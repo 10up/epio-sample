@@ -1,0 +1,42 @@
+{
+    "name": "10up/elasticpress-sample",
+    "description": "ElasticPress.io sample project demonstrating integration with Nobel Prize dataset",
+    "type": "project",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "10up",
+            "homepage": "https://10up.com"
+        }
+    ],
+    "require": {
+        "php": ">=8.1",
+        "guzzlehttp/guzzle": "^7.8",
+        "vlucas/phpdotenv": "^5.6"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "ElasticPressIO\\Sample\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "ElasticPressIO\\Sample\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "setup": "php bin/setup.php",
+        "index": "php bin/index.php",
+        "search": "php bin/search.php",
+        "setup-template": "php bin/setup-template.php",
+        "manage-templates": "php bin/manage-templates.php"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true
+    }
+}
