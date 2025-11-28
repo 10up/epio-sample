@@ -1,6 +1,6 @@
 # ElasticPress.io Sample Project
 
-A comprehensive example demonstrating how to integrate with ElasticPress.io outside of WordPress using the Nobel Prize dataset.
+A comprehensive example demonstrating how to integrate with the managed Elasticsearch service [ElasticPress.io](https://elasticpress.io) outside of WordPress using the Nobel Prize dataset.
 
 **Data Source:** This project uses data from the [Nobel Prize API v2.1](https://www.nobelprize.org/about/developer-zone-2/), provided by Nobel Prize Outreach. The API contains information about all Nobel Prize laureates from 1901 to present.
 
