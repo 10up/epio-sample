@@ -65,9 +65,6 @@ class Config
                 // Default to subscription_id with trailing dash for ElasticPress.io naming
                 'prefix' => $subscriptionId ? $subscriptionId . '-' : '',
             ],
-            'app' => [
-                'env' => $_ENV['APP_ENV'] ?? 'development',
-            ],
         ];
     }
 

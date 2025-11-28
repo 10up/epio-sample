@@ -143,10 +143,6 @@ Search templates are server-side query definitions that enable secure, unauthent
 **Key Differences from Standard Elasticsearch:**
 - **CRITICAL:** The `/autosuggest` endpoint has strict parameter validation
 - Some parameters that work in standard Elasticsearch queries cause "Disallowed parameters" errors
-- Specifically for this endpoint:
-  - Cannot use `multi_match` with `fields` array - use individual `match` queries per field
-  - Complex nested bool queries may fail - use simpler query structures
-  - Some query parameters work in `/_search` but not in `/autosuggest`
 - Template endpoint: `PUT /api/v1/search/posts/{index}/template`
 - Frontend calls: `POST /{index}/autosuggest` (no authentication required!)
 - Read more: [ElasticPress.io Post Search API Documentation](https://www.elasticpress.io/resources/articles/instant-results-post-search-api/)

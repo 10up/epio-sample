@@ -167,7 +167,7 @@ class NobelDataTransformer
             'death_country_name' => $deathCountry,
             'death_city' => $deathCity,
             'affiliations' => $affiliations,
-            'prize_countries' => array_unique($prizeCountries),
+            'prize_countries' => array_values(array_unique($prizeCountries)),
         ];
     }
 

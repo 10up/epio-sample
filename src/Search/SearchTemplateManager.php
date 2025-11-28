@@ -32,8 +32,7 @@ class SearchTemplateManager
      * This template allows fast name suggestions without authentication.
      * Uses the {{ep_placeholder}} syntax required by ElasticPress.io.
      *
-     * Structure exactly matches ElasticPress.io production autosuggest with
-     * the proper nesting: bool -> should -> bool -> must -> bool -> should -> multi_match
+     * @see https://www.elasticpress.io/resources/articles/instant-results-post-search-api/
      *
      * @param string $indexName Index name
      * @return array Response from ElasticPress.io
@@ -94,71 +93,6 @@ class SearchTemplateManager
                         ],
                     ],
                 ],
-            ],
-        ];
-
-        return $this->client->put("/api/v1/search/posts/{$indexName}/template", $template);
-    }
-
-    /**
-     * Create a full search template with faceting.
-     *
-     * This template provides full-text search with faceted filtering.
-     *
-     * @param string $indexName Index name
-     * @return array Response from ElasticPress.io
-     */
-    public function createSearchTemplate(string $indexName): array
-    {
-        $template = [
-            'template' => [
-                'size' => 20,
-                'from' => 0,
-                'query' => [
-                    'bool' => [
-                        'must' => [],
-                        'filter' => [],
-                    ],
-                ],
-                'aggs' => [
-                    'categories' => [
-                        'terms' => [
-                            'field' => 'category',
-                            'size' => 10,
-                        ],
-                    ],
-                    'genders' => [
-                        'terms' => [
-                            'field' => 'gender',
-                            'size' => 10,
-                        ],
-                    ],
-                    'year_stats' => [
-                        'stats' => [
-                            'field' => 'year',
-                        ],
-                    ],
-                ],
-                'sort' => [
-                    ['year' => ['order' => 'desc']],
-                    '_score',
-                ],
-            ],
-        ];
-
-        // Add search query if placeholder is provided
-        $template['template']['query']['bool']['must'][] = [
-            'multi_match' => [
-                'query' => '{{ep_placeholder}}',
-                'fields' => [
-                    'fullname^3',
-                    'firstname^2',
-                    'surname^2',
-                    'motivation',
-                    'affiliations.name',
-                ],
-                'type' => 'best_fields',
-                'operator' => 'or',
             ],
         ];
 

@@ -6,6 +6,7 @@ declare(strict_types=1);
  * Manage search templates for ElasticPress.io.
  *
  * This script allows you to list, view, and delete search templates.
+ * @see https://www.elasticpress.io/resources/articles/instant-results-post-search-api/  
  *
  * Usage:
  *   php bin/manage-templates.php list

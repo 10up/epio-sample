@@ -8,6 +8,8 @@ declare(strict_types=1);
  * This script creates search templates that allow frontend JavaScript
  * to query the index directly without exposing authentication credentials.
  *
+ * @see https://www.elasticpress.io/resources/articles/instant-results-post-search-api/
+ *
  * Usage: php bin/setup-template.php
  */
 
