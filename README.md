@@ -367,3 +367,13 @@ ElasticPress.io doesn't accept `_index` in bulk operation metadata.
 ## License
 
 MIT
+
+## Support Level
+
+**Provided as-is:** This sample project is provided as-is and we do not provide support for this project. It is merely sample code to explain how to interact with ElasticPress. If you need engineering consulting don't hesitate to ask about [ElasticPress.io Consulting](https://www.elasticpress.io/elasticpress-consulting/)
+
+## Like what you see?
+
+<p align="center">
+<a href="https://10up.com/contact/"><img src="https://10up.com/uploads/2016/10/10up-Github-Banner.png" width="850"></a>
+</p>
