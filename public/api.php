@@ -35,7 +35,7 @@ try {
 
     // Handle document detail request
     if (!empty($_GET['id'])) {
-        $indexName = $config->getIndexPrefix() . '-laureates';
+        $indexName = $config->getIndexPrefix() . 'laureates';
         $client = new \ElasticPressIO\Sample\Client\ElasticsearchClient();
 
         // Use search with match query instead of _doc API
@@ -91,7 +91,7 @@ try {
     }
 
     // Perform search
-    $indexName = $config->getIndexPrefix() . '-laureates';
+    $indexName = $config->getIndexPrefix() . 'laureates';
     $searchService = new SearchService();
 
     $results = $searchService->search($indexName, $query, $filters, $from, $perPage);

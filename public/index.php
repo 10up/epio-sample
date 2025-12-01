@@ -8,14 +8,14 @@ try {
     $config = Config::getInstance();
     $config->validate();
 
-    $indexName = $config->getIndexPrefix() . '-laureates';
+    $indexName = $config->getIndexPrefix() . 'laureates';
     $templateManager = new SearchTemplateManager();
     $apiUrl = $templateManager->getPublicSearchUrl($indexName);
-    $autosuggestUrl = $templateManager->getAutosuggestUrl($indexName);
+    $searchApiUrl = $templateManager->getPublicSearchUrl($indexName);
 } catch (\Exception $e) {
     // Fallback if config fails
     $apiUrl = '';
-    $autosuggestUrl = '';
+    $searchApiUrl = '';
     error_log('Failed to load ElasticPress.io config: ' . $e->getMessage());
 }
 ?>
@@ -492,7 +492,7 @@ try {
         // Configuration - Automatically set from .env configuration
         // This is the PUBLIC API endpoint that requires NO authentication
         const ELASTICPRESS_API_URL = <?php echo json_encode($apiUrl); ?>;
-        const ELASTICPRESS_AUTOSUGGEST_URL = <?php echo json_encode($autosuggestUrl); ?>;
+        const ELASTICPRESS_SEARCH_API_URL = <?php echo json_encode($searchApiUrl); ?>;
 
         // Generate UUID v4 for request IDs (based on ElasticPress implementation)
         function generateUUID() {
@@ -517,7 +517,7 @@ try {
         // Load autosuggest template on page load
         async function loadAutosuggestTemplate() {
             try {
-                const response = await fetch('autosuggest-template.php');
+                const response = await fetch('search-api-template.php');
                 const data = await response.json();
                 if (data.success && data.template) {
                     autosuggestTemplate = data.template;
@@ -593,26 +593,24 @@ try {
                 const replacedStr = templateStr.replace(/\{\{ep_placeholder\}\}/g, query);
                 const searchBody = JSON.parse(replacedStr);
 
-                console.log('Autosuggest query:', query);
+                console.log('Search query:', query);
                 console.log('Request body:', searchBody);
 
-                const response = await fetch(`${ELASTICPRESS_AUTOSUGGEST_URL}`, {
-                    method: 'POST',
+                const response = await fetch(`${ELASTICPRESS_SEARCH_API_URL}?search=${query}`, {
+                    method: 'GET',
                     headers: {
-                        'Content-Type': 'application/json',
                         'X-ElasticPress-Request-ID': requestId
-                    },
-                    body: JSON.stringify(searchBody)
+                    }
                 });
 
                 console.log('Response status:', response.status);
                 const data = await response.json();
                 console.log('Response data:', data);
-                console.log('Autosuggest Request ID:', requestId);
+                console.log('Search Request ID:', requestId);
 
                 displayAutosuggest(data, query);
             } catch (error) {
-                console.error('Autosuggest error:', error);
+                console.error('Search error:', error);
                 hideAutosuggest();
             }
         }

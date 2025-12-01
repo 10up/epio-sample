@@ -27,7 +27,7 @@ class SearchTemplateManager
     }
 
     /**
-     * Create an autosuggest search template.
+     * Create a search template.
      *
      * This template allows fast name suggestions without authentication.
      * Uses the {{ep_placeholder}} syntax required by ElasticPress.io.
@@ -37,55 +37,53 @@ class SearchTemplateManager
      * @param string $indexName Index name
      * @return array Response from ElasticPress.io
      */
-    public function createAutosuggestTemplate(string $indexName): array
+    public function createSearchTemplate(string $indexName): array
     {
         $template = [
-            'template' => [
-                'query' => [
-                    'bool' => [
-                        'should' => [
-                            [
-                                'match_phrase_prefix' => [
-                                    'fullname' => [
-                                        'query' => '{{ep_placeholder}}',
-                                        'boost' => 3,
-                                    ],
+            'query' => [
+                'bool' => [
+                    'should' => [
+                        [
+                            'match_phrase_prefix' => [
+                                'fullname' => [
+                                    'query' => '{{ep_placeholder}}',
+                                    'boost' => 3,
                                 ],
                             ],
-                            [
-                                'match_phrase_prefix' => [
-                                    'firstname' => [
-                                        'query' => '{{ep_placeholder}}',
-                                        'boost' => 2,
-                                    ],
+                        ],
+                        [
+                            'match_phrase_prefix' => [
+                                'firstname' => [
+                                    'query' => '{{ep_placeholder}}',
+                                    'boost' => 2,
                                 ],
                             ],
-                            [
-                                'match' => [
-                                    'fullname' => [
-                                        'query' => '{{ep_placeholder}}',
-                                        'fuzziness' => 'auto',
-                                        'boost' => 1,
-                                    ],
+                        ],
+                        [
+                            'match' => [
+                                'fullname' => [
+                                    'query' => '{{ep_placeholder}}',
+                                    'fuzziness' => 'auto',
+                                    'boost' => 1,
                                 ],
                             ],
-                            [
-                                'match' => [
-                                    'motivation' => [
-                                        'query' => '{{ep_placeholder}}',
-                                        'boost' => 0.5,
-                                    ],
+                        ],
+                        [
+                            'match' => [
+                                'motivation' => [
+                                    'query' => '{{ep_placeholder}}',
+                                    'boost' => 0.5,
                                 ],
                             ],
-                            [
-                                'nested' => [
-                                    'path' => 'affiliations',
-                                    'query' => [
-                                        'match' => [
-                                            'affiliations.name' => [
-                                                'query' => '{{ep_placeholder}}',
-                                                'boost' => 0.5,
-                                            ],
+                        ],
+                        [
+                            'nested' => [
+                                'path' => 'affiliations',
+                                'query' => [
+                                    'match' => [
+                                        'affiliations.name' => [
+                                            'query' => '{{ep_placeholder}}',
+                                            'boost' => 0.5,
                                         ],
                                     ],
                                 ],
@@ -143,19 +141,5 @@ class SearchTemplateManager
     {
         $host = rtrim($this->config->getElasticsearchHost(), '/');
         return "{$host}/api/v1/search/posts/{$indexName}";
-    }
-
-    /**
-     * Get the public autosuggest API URL for an index.
-     *
-     * This URL can be called directly from frontend JavaScript for autosuggest/autocomplete.
-     *
-     * @param string $indexName Index name
-     * @return string Public autosuggest API URL
-     */
-    public function getAutosuggestUrl(string $indexName): string
-    {
-        $host = rtrim($this->config->getElasticsearchHost(), '/');
-        return "{$host}/{$indexName}/autosuggest";
     }
 }

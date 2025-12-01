@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * Returns the autosuggest query template as JSON.
+ * Returns the search query template as JSON.
  *
  * This endpoint provides the ElasticSearch query template used for autosuggest,
  * ensuring the frontend uses the same configuration as the backend.
@@ -30,7 +30,7 @@ try {
     $config = Config::getInstance();
     $config->validate();
 
-    $indexName = $config->getIndexPrefix() . '-laureates';
+    $indexName = $config->getIndexPrefix() . 'laureates';
     $templateManager = new SearchTemplateManager();
 
     // Get the template and extract just the query structure
@@ -39,7 +39,7 @@ try {
     // Return the template
     echo json_encode([
         'success' => true,
-        'template' => $template['template'] ?? null,
+        'template' => $template ?? null,
         'index' => $indexName,
     ], JSON_PRETTY_PRINT);
 

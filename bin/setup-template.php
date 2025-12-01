@@ -25,14 +25,14 @@ try {
     $config = Config::getInstance();
     $config->validate();
 
-    $indexName = $config->getIndexPrefix() . '-laureates';
+    $indexName = $config->getIndexPrefix() . 'laureates';
     $templateManager = new SearchTemplateManager();
 
-    echo "1. Creating autosuggest search template for '{$indexName}'...\n";
+    echo "1. Creating search template for '{$indexName}'...\n";
 
     try {
-        $response = $templateManager->createAutosuggestTemplate($indexName);
-        echo "   ✓ Autosuggest template created successfully\n";
+        $response = $templateManager->createSearchTemplate($indexName);
+        echo "   ✓ Search template created successfully\n";
         echo "   Response: " . json_encode($response, JSON_PRETTY_PRINT) . "\n\n";
     } catch (\Exception $e) {
         echo "   ⚠ Template creation returned: " . $e->getMessage() . "\n\n";

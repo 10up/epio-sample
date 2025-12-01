@@ -10,7 +10,7 @@ A comprehensive example demonstrating how to integrate with the managed Elastics
 - Creating and managing indexes with proper mappings
 - Bulk indexing operations from external APIs
 - Full-text search with faceting and filters
-- Real-time autosuggest using ElasticPress.io search templates
+- Real-time searches using ElasticPress.io search templates
 - Interactive web interface with detail views
 - Key differences between standard Elasticsearch and ElasticPress.io
 
@@ -35,7 +35,7 @@ cp .env.example .env
 php bin/setup.php
 php bin/index.php
 
-# 4. Set up autosuggest/search template
+# 4. Set up search template
 php bin/setup-template.php
 
 # 5. Start web server
@@ -58,7 +58,7 @@ ELASTICPRESS_SUBSCRIPTION_TOKEN=your-subscription-token
 
 **Key Difference from Standard Elasticsearch:**
 - Uses Subscription ID and Token instead of username/password
-- Index names must be prefixed with your subscription ID (e.g., `subscription-id--index-name`)
+- Index names must be prefixed with your subscription ID (e.g., `subscription-id-index-name`)
 - This is handled automatically by the `Config` class
 
 ### Step 2: Create the Index
@@ -69,11 +69,11 @@ php bin/setup.php
 
 **What this does:**
 1. Validates your ElasticPress.io credentials
-2. Creates an index named `{subscription-id}--laureates`
+2. Creates an index named `{subscription-id}-laureates`
 3. Applies field mappings for Nobel Prize data (see `src/Mapping/NobelPrizeMapping.php`)
 
 **Key Differences from Standard Elasticsearch:**
-- Index name format must follow `{subscription-id}--{your-index-name}` pattern
+- Index name format must follow `{subscription-id}-{your-index-name}` pattern
 - Uses HTTP Basic Auth with Subscription ID:Token
 - Standard Elasticsearch index creation API works the same way otherwise
 
@@ -92,8 +92,8 @@ php bin/index.php
 
 **Key Differences from Standard Elasticsearch:**
 - **CRITICAL:** ElasticPress.io does NOT allow the `_index` field in bulk operation metadata
-- Standard Elasticsearch bulk format includes `{"index": {"_index": "name", "_id": "123"}}`
-- ElasticPress.io format: `{"index": {"_id": "123"}}` (no `_index` field)
+- Standard Elasticsearch bulk format includes `{"index": {"_index": "name", "_id": "<unique-id>"}}`
+- ElasticPress.io format: `{"index": {"_id": "<unique-id>"}}` (no `_index` field)
 - The index name is specified in the URL path instead
 - See `src/Index/BulkIndexer.php` for implementation
 
@@ -104,7 +104,7 @@ Each laureate document includes:
 - Affiliations: institutions with locations (nested field)
 - Unique ID format: `{laureate-id}-{year}-{category}`
 
-### Step 4: Set Up Autosuggest/Search Template
+### Step 4: Set Up Search Template
 
 ```bash
 php bin/setup-template.php
@@ -129,8 +129,8 @@ Search templates are server-side query definitions that enable secure, unauthent
    - Template contains your search logic with `{{ep_placeholder}}` for user input
 
 2. **Frontend Usage (no authentication):** Your JavaScript can call the template directly
-   - Endpoint: `POST /{index}/autosuggest`
-   - No credentials required - ElasticPress.io validates the request against your template
+   - Endpoint: `GET /api/v1/search/posts/{index}?search={search term}`
+   - No credentials required
    - User input is safely inserted into the template's placeholders
    - Fast response times (direct connection, no PHP proxy)
 
@@ -141,10 +141,9 @@ Search templates are server-side query definitions that enable secure, unauthent
 - **Rate Limiting:** ElasticPress.io handles abuse prevention automatically
 
 **Key Differences from Standard Elasticsearch:**
-- **CRITICAL:** The `/autosuggest` endpoint has strict parameter validation
-- Some parameters that work in standard Elasticsearch queries cause "Disallowed parameters" errors
+- **CRITICAL:** The `/api/v1/search/posts/{index}` endpoint has strict parameter validation
 - Template endpoint: `PUT /api/v1/search/posts/{index}/template`
-- Frontend calls: `POST /{index}/autosuggest` (no authentication required!)
+- Frontend calls: `POST /api/v1/search/posts/{index}` (no authentication required!)
 - Read more: [ElasticPress.io Post Search API Documentation](https://www.elasticpress.io/resources/articles/instant-results-post-search-api/)
 
 ### Step 5: Test the Web Interface
@@ -154,7 +153,7 @@ php -S localhost:8000 -t public
 ```
 
 **Features:**
-- **Autosuggest:** Real-time suggestions as you type (calls ElasticPress.io directly)
+- **Autosuggest/Typeahead:** Real-time suggestions as you type (calls ElasticPress.io directly)
   - Shows matching field context (motivation, affiliation) when not a name match
 - **Full-text search:** Searches across names, motivations, affiliations
 - **Faceted filtering:** Interactive checkboxes for category and gender
@@ -170,12 +169,12 @@ php -S localhost:8000 -t public
 │   ├── setup.php                  # Create index with mappings
 │   ├── index.php                  # Fetch and index Nobel Prize data
 │   ├── search.php                 # Command-line search
-│   ├── setup-template.php         # Configure autosuggest template
+│   ├── setup-template.php         # Configure search template
 │   └── manage-templates.php       # List/view/delete templates
 ├── public/                        # Web application
 │   ├── index.php                  # Main UI (auto-configured from .env)
 │   ├── api.php                    # REST API endpoint
-│   └── autosuggest-template.php   # Serves template as JSON for frontend
+│   └── search-api-template.php    # Serves template as JSON for frontend
 ├── src/
 │   ├── Client/
 │   │   └── ElasticsearchClient.php      # HTTP client with Basic Auth
@@ -208,8 +207,8 @@ my-other-index
 
 **ElasticPress.io:**
 ```
-subscription-id--my-index
-subscription-id--my-other-index
+subscription-id-my-index
+subscription-id-my-other-index
 ```
 The subscription ID prefix is mandatory and automatically added by `Config::getIndexPrefix()`.
 
@@ -237,27 +236,7 @@ The `_index` field is disallowed; specify index in URL: `POST /{index}/_bulk`
 - HTTP Basic Auth with Subscription ID as username, Token as password
 - Required for all requests except template-based searches
 
-### Document Retrieval
-**Standard Elasticsearch:**
-```
-GET /{index}/_doc/{id}
-```
-
-**ElasticPress.io:**
-The `_doc` endpoint returns 404. Use search instead:
-```json
-POST /{index}/_search
-{
-  "query": {
-    "match": {
-      "id": "{id}"
-    }
-  },
-  "size": 1
-}
-```
-
-### Search Templates and Autosuggest
+### Search Templates
 **Standard Elasticsearch:**
 - Stored scripts or search templates
 - Full query DSL available
@@ -265,8 +244,7 @@ POST /{index}/_search
 **ElasticPress.io:**
 - Template API: `PUT /api/v1/search/posts/{index}/template`
 - Uses `{{ep_placeholder}}` syntax for parameter substitution
-- `/autosuggest` endpoint has stricter parameter validation
-- Some query structures that work in `_search` fail in `/autosuggest`
+- `/api/v1/search/posts/{index}` endpoint has stricter parameter validation
 - No authentication required for template-based searches
 - Enables secure, public-facing autocomplete functionality
 
@@ -322,14 +300,6 @@ php bin/manage-templates.php delete {index-name}
 
 ## Troubleshooting
 
-### "Disallowed parameters used in query"
-This occurs when using the `/autosuggest` endpoint with query structures that aren't allowed. Common issues:
-- Using `multi_match` with `fields` array - use individual `match` queries instead
-- Complex nested bool queries - simplify to direct query clauses
-- Some query parameters work in `_search` but not in `/autosuggest`
-
-**Solution:** Use simple query types like `match`, `match_phrase_prefix`, or `bool` with basic `should` clauses.
-
 ### "explicit index in bulk is not allowed"
 ElasticPress.io doesn't accept `_index` in bulk operation metadata.
 
@@ -347,7 +317,7 @@ ElasticPress.io doesn't accept `_index` in bulk operation metadata.
 - Try search without filters first
 - Verify document structure matches mapping
 
-### Autosuggest not working
+### Autosuggest/typeahead not working
 - Ensure template was created: `php bin/setup-template.php`
 - Check browser console for errors
 - Verify API endpoint URL in page source
