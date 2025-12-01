@@ -35,7 +35,7 @@ try {
     echo "   ✓ Connected successfully\n\n";
 
     // Create index
-    $indexName = $config->getIndexPrefix() . '-laureates';
+    $indexName = $config->getIndexPrefix() . 'laureates';
     echo "3. Creating index '{$indexName}'...\n";
 
     // Check if index already exists
@@ -66,7 +66,7 @@ try {
 
     // List indexes
     echo "4. Listing indexes...\n";
-    $indexes = $indexManager->listIndexes($config->getIndexPrefix() . '-*');
+    $indexes = $indexManager->listIndexes($config->getIndexPrefix() . '*');
     foreach ($indexes as $index) {
         echo "   - " . $index['name'] . "\n";
     }

@@ -28,7 +28,7 @@ try {
     $config = Config::getInstance();
     $config->validate();
 
-    $indexName = $config->getIndexPrefix() . '-laureates';
+    $indexName = $config->getIndexPrefix() . 'laureates';
 
     // Check if index exists
     echo "1. Checking if index exists...\n";

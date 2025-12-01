@@ -51,7 +51,7 @@ try {
     }
 
     // Perform search
-    $indexName = $config->getIndexPrefix() . '-laureates';
+    $indexName = $config->getIndexPrefix() . 'laureates';
     $searchService = new SearchService();
 
     echo "Searching for: " . ($query ?: 'all') . "\n";

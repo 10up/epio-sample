@@ -62,7 +62,7 @@ try {
         case 'get':
             if (empty($indexName)) {
                 echo "Usage: php bin/manage-templates.php view <index-name>\n";
-                echo "Example: php bin/manage-templates.php view {$config->getIndexPrefix()}-laureates\n";
+                echo "Example: php bin/manage-templates.php view {$config->getIndexPrefix()}laureates\n";
                 exit(1);
             }
 
@@ -83,7 +83,7 @@ try {
         case 'remove':
             if (empty($indexName)) {
                 echo "Usage: php bin/manage-templates.php delete <index-name>\n";
-                echo "Example: php bin/manage-templates.php delete {$config->getIndexPrefix()}-laureates\n";
+                echo "Example: php bin/manage-templates.php delete {$config->getIndexPrefix()}laureates\n";
                 exit(1);
             }
 
@@ -118,8 +118,8 @@ try {
             echo "  delete <index-name>     Delete a specific template\n\n";
             echo "Examples:\n";
             echo "  php bin/manage-templates.php list\n";
-            echo "  php bin/manage-templates.php view {$config->getIndexPrefix()}-laureates\n";
-            echo "  php bin/manage-templates.php delete {$config->getIndexPrefix()}-laureates\n\n";
+            echo "  php bin/manage-templates.php view {$config->getIndexPrefix()}laureates\n";
+            echo "  php bin/manage-templates.php delete {$config->getIndexPrefix()}laureates\n\n";
             break;
     }
 
