@@ -1,338 +1,386 @@
 # ElasticPress.io Sample Project
 
-A comprehensive example demonstrating how to integrate with the managed Elasticsearch service [ElasticPress.io](https://elasticpress.io) outside of WordPress using the Nobel Prize dataset.
+A comprehensive example demonstrating how to use [ElasticPress.io](https://elasticpress.io) as a vector knowledge store for both traditional search and AI-powered applications, built with the Nobel Prize dataset.
 
-**Data Source:** This project uses data from the [Nobel Prize API v2.1](https://www.nobelprize.org/about/developer-zone-2/), provided by Nobel Prize Outreach. The API contains information about all Nobel Prize laureates from 1901 to present.
+**Data Source:** [Nobel Prize API v2.1](https://www.nobelprize.org/about/developer-zone-2/) by Nobel Prize Outreach.
 
 ## What This Project Demonstrates
 
-- Authentication with ElasticPress.io endpoints
-- Creating and managing indexes with proper mappings
-- Bulk indexing operations from external APIs
-- Full-text search with faceting and filters
-- Real-time searches using ElasticPress.io search templates
-- Interactive web interface with detail views
-- Key differences between standard Elasticsearch and ElasticPress.io
+**Search**
+- Full-text keyword search with faceting, filters, and fuzzy matching
+- Semantic (vector/kNN) search using dense embeddings
+- Hybrid search combining BM25 and vector similarity
+- Real-time autosuggest via ElasticPress.io search templates
+
+**AI / RAG**
+- Ask AI: natural language questions answered from the database with source citations
+- Three-phase RAG pipeline: query understanding → multi-strategy retrieval + RRF → grounded generation
+- Aggregation queries: "which person won the most prizes?", "which country produced the most laureates?"
+- Compatible with any OpenAI-compatible API (OpenAI, Ollama, LM Studio, Groq, Azure)
+
+**MCP Server**
+- Exposes search and Ask AI as tools for AI models via the [Model Context Protocol](https://modelcontextprotocol.io)
+- Works with Claude Desktop, Claude Code, and any MCP-compatible client
+- Demonstrates using Elasticsearch as a local vector knowledge store for AI agents
+
+**ElasticPress.io specifics**
+- Correct bulk indexing format (no `_index` in action metadata)
+- Index naming conventions
+- Search template API for unauthenticated frontend access
+
+---
 
 ## Prerequisites
 
-- PHP 8.1 or higher
+- PHP 8.1+
 - Composer
-- An ElasticPress.io account with credentials ([Sign up here](https://www.elasticpress.io/))
-- Web server (built-in PHP server works for development)
+- An [ElasticPress.io](https://www.elasticpress.io/) account
+- An OpenAI-compatible API key (for semantic search, Ask AI, and MCP tools)
+
+---
 
 ## Quick Start
 
 ```bash
-# 1. Install dependencies
+# Install dependencies
 composer install
 
-# 2. Configure credentials
+# Configure credentials
 cp .env.example .env
-# Edit .env with your ElasticPress.io credentials
+# Edit .env — at minimum fill in ELASTICPRESS_* and OPENAI_API_KEY
 
-# 3. Create index and import data
+# Create the index and import data
 php bin/setup.php
 php bin/index.php
 
-# 4. Set up search template
+# Generate vector embeddings (requires OPENAI_API_KEY)
+php bin/generate-embeddings.php
+
+# Set up the autosuggest search template
 php bin/setup-template.php
 
-# 5. Start web server
+# Start the web server
 php -S localhost:8000 -t public
 ```
 
-Open http://localhost:8000 in your browser.
+Open http://localhost:8000 — use the **Search** tab for keyword/semantic/hybrid search, and the **Ask AI** tab for natural language questions.
 
-## Detailed Setup Guide
+---
 
-### Step 1: Configure Credentials
+## Configuration
 
-Edit `.env` with your ElasticPress.io credentials:
+Copy `.env.example` to `.env` and fill in your credentials:
 
 ```env
-ELASTICPRESS_HOST=https://your-endpoint.clients.hosted-elasticpress.io
+# ElasticPress.io
+ELASTICPRESS_HOST=https://your-endpoint.elasticpress.io
 ELASTICPRESS_SUBSCRIPTION_ID=your-subscription-id
 ELASTICPRESS_SUBSCRIPTION_TOKEN=your-subscription-token
+
+# OpenAI-compatible API (OpenAI, Ollama, LM Studio, Groq, Azure, …)
+OPENAI_API_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=sk-your-api-key
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_CHAT_MODEL=gpt-4o-mini
 ```
 
-**Key Difference from Standard Elasticsearch:**
-- Uses Subscription ID and Token instead of username/password
-- Index names must be prefixed with your subscription ID (e.g., `subscription-id-index-name`)
-- This is handled automatically by the `Config` class
+**Using a local model?** Point `OPENAI_API_BASE_URL` at your provider:
 
-### Step 2: Create the Index
+| Provider | Base URL |
+|----------|----------|
+| OpenAI | `https://api.openai.com/v1` |
+| Ollama | `http://localhost:11434/v1` |
+| LM Studio | `http://localhost:1234/v1` |
+| Groq | `https://api.groq.com/openai/v1` |
+
+---
+
+## Setup Steps
+
+### 1. Create the index
 
 ```bash
 php bin/setup.php
 ```
 
-**What this does:**
-1. Validates your ElasticPress.io credentials
-2. Creates an index named `{subscription-id}-laureates`
-3. Applies field mappings for Nobel Prize data (see `src/Mapping/NobelPrizeMapping.php`)
+Creates the `{subscription-id}-laureates` index with full-text and vector field mappings.
 
-**Key Differences from Standard Elasticsearch:**
-- Index name format must follow `{subscription-id}-{your-index-name}` pattern
-- Uses HTTP Basic Auth with Subscription ID:Token
-- Standard Elasticsearch index creation API works the same way otherwise
+If you already have the index and only need to add the vector field:
 
-### Step 3: Index the Data
+```bash
+php bin/update-mapping.php
+```
+
+### 2. Index the data
 
 ```bash
 php bin/index.php
 ```
 
-**What this does:**
-1. Fetches data from [Nobel Prize API v2.1](https://www.nobelprize.org/about/developer-zone-2/)
-2. Processes both laureates and prizes endpoints with pagination
-3. Transforms and normalizes the data (handles multilingual fields, nested structures)
-4. Bulk indexes ~1,000+ documents to ElasticPress.io
-5. Displays statistics: total, successful, failed
+Fetches ~1,000 laureate documents from the Nobel Prize API and bulk-indexes them.
 
-**Key Differences from Standard Elasticsearch:**
-- **CRITICAL:** ElasticPress.io does NOT allow the `_index` field in bulk operation metadata
-- Standard Elasticsearch bulk format includes `{"index": {"_index": "name", "_id": "<unique-id>"}}`
-- ElasticPress.io format: `{"index": {"_id": "<unique-id>"}}` (no `_index` field)
-- The index name is specified in the URL path instead
-- See `src/Index/BulkIndexer.php` for implementation
+> **ElasticPress.io note:** Bulk action metadata must not include `_index`. The index is specified in the URL instead. See `src/Index/BulkIndexer.php`.
 
-**Data Structure:**
-Each laureate document includes:
-- Personal info: name, gender, birth/death details
-- Prize info: category, year, motivation, share
-- Affiliations: institutions with locations (nested field)
-- Unique ID format: `{laureate-id}-{year}-{category}`
+### 3. Generate vector embeddings
 
-### Step 4: Set Up Search Template
+```bash
+php bin/generate-embeddings.php
+
+# Options
+php bin/generate-embeddings.php --dry-run          # preview without API calls
+php bin/generate-embeddings.php --batch-size=50    # documents per API call
+php bin/generate-embeddings.php --force            # re-generate existing embeddings
+```
+
+Each laureate document gets a `motivation_embedding` field (1536-dim dense vector) built from: `{category} {name} ({year}): {motivation}. Affiliated with: {institutions}`.
+
+> Approximate cost with `text-embedding-3-small`: < $0.01 for the full dataset.
+
+### 4. Set up the autosuggest template
 
 ```bash
 php bin/setup-template.php
 ```
 
-**What this does:**
-1. Creates a search template on ElasticPress.io using the [Post Search API](https://www.elasticpress.io/resources/articles/instant-results-post-search-api/)
-2. Template uses `{{ep_placeholder}}` for query parameter substitution
-3. Configures multiple search strategies:
-   - `match_phrase_prefix` for autocomplete on fullname and firstname
-   - `match` with `fuzziness: auto` for typo tolerance
-   - `match` on motivation text
-   - `nested` query for affiliation names
+Creates an ElasticPress.io search template enabling unauthenticated autosuggest directly from the browser.
 
-**Understanding ElasticPress.io Search Templates:**
+---
 
-Search templates are server-side query definitions that enable secure, unauthenticated access to your Elasticsearch data from frontend applications. Here's how it works:
-
-1. **Create Template (authenticated):** You define a query structure with placeholders and store it on ElasticPress.io
-   - Endpoint: `PUT /api/v1/search/posts/{index}/template`
-   - Requires your Subscription ID and Token
-   - Template contains your search logic with `{{ep_placeholder}}` for user input
-
-2. **Frontend Usage (no authentication):** Your JavaScript can call the template directly
-   - Endpoint: `GET /api/v1/search/posts/{index}?search={search term}`
-   - No credentials required
-   - User input is safely inserted into the template's placeholders
-   - Fast response times (direct connection, no PHP proxy)
-
-**Benefits:**
-- **Security:** Search logic is controlled server-side; users can't modify queries
-- **Performance:** Direct client-to-ElasticPress.io connection (no backend proxy needed)
-- **Simplicity:** No need to expose or manage API credentials in frontend code
-- **Rate Limiting:** ElasticPress.io handles abuse prevention automatically
-
-**Key Differences from Standard Elasticsearch:**
-- **CRITICAL:** The `/api/v1/search/posts/{index}` endpoint has strict parameter validation
-- Template endpoint: `PUT /api/v1/search/posts/{index}/template`
-- Frontend calls: `POST /api/v1/search/posts/{index}` (no authentication required!)
-- Read more: [ElasticPress.io Post Search API Documentation](https://www.elasticpress.io/resources/articles/instant-results-post-search-api/)
-
-### Step 5: Test the Web Interface
+## Using the Web Interface
 
 ```bash
 php -S localhost:8000 -t public
 ```
 
-**Features:**
-- **Autosuggest/Typeahead:** Real-time suggestions as you type (calls ElasticPress.io directly)
-  - Shows matching field context (motivation, affiliation) when not a name match
-- **Full-text search:** Searches across names, motivations, affiliations
-- **Faceted filtering:** Interactive checkboxes for category and gender
-- **Year range filters:** From/To inputs with validation
-- **Detail views:** Click any result to see complete laureate information
-- **Responsive design:** Works on desktop and mobile
+### Search tab
+
+| Mode | Description |
+|------|-------------|
+| **Keyword** | BM25 full-text search with fuzzy matching across names, motivations, affiliations |
+| **Semantic** | kNN vector search — finds results by meaning, not keyword match |
+| **Hybrid** | Combines BM25 and kNN scores for best-of-both retrieval |
+
+Results include relevance score. Filters (category, gender, year) apply to all modes.
+
+### Ask AI tab
+
+Ask natural language questions. The system:
+1. Extracts structured search parameters (category, gender, year, country) from the question
+2. Runs keyword, semantic, and filter-based retrieval in parallel
+3. Fuses results with Reciprocal Rank Fusion
+4. Generates a grounded answer with source citations
+
+Example questions:
+- *Which women won the physics prize?*
+- *What breakthroughs in cancer research won Nobel Prizes?*
+- *Which person won the most Nobel prizes?*
+- *Which country produced the most chemistry laureates?*
+
+---
+
+## CLI Scripts
+
+```bash
+# Keyword search
+php bin/search.php "einstein"
+php bin/search.php --category=physics --gender=female
+php bin/search.php "quantum" --year-from=2000
+
+# Semantic and hybrid search (requires embeddings)
+php bin/semantic-search.php "quantum entanglement"
+php bin/semantic-search.php "nuclear structure" --mode=hybrid --k=10
+
+# Ask AI (RAG)
+php bin/ask.php "What contributions did women make to physics?"
+php bin/ask.php "Which German physicists won prizes after 1950?" --verbose
+
+# Manage templates
+php bin/manage-templates.php list
+php bin/manage-templates.php view {index-name}
+```
+
+---
+
+## MCP Server
+
+The project includes an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that exposes search and Ask AI as tools for AI models.
+
+### Available tools
+
+| Tool | Description |
+|------|-------------|
+| `search` | Keyword search with filters (category, gender, country, year) |
+| `semantic_search` | Vector kNN search by concept similarity |
+| `hybrid_search` | Combined BM25 + kNN search |
+| `ask` | Answer a question using RAG — the AI decides what to search for |
+| `get_document` | Fetch a specific laureate document by ID |
+
+### Adding to Claude Code (CLI)
+
+```bash
+claude mcp add nobel-prize \
+  -e OPENAI_API_KEY="your-key" \
+  -e OPENAI_API_BASE_URL="https://api.openai.com/v1" \
+  -e OPENAI_CHAT_MODEL="gpt-4o-mini" \
+  -e OPENAI_EMBEDDING_MODEL="text-embedding-3-small" \
+  -- php /absolute/path/to/bin/mcp-server.php
+```
+
+The ElasticPress.io credentials are read from `.env` automatically. OpenAI credentials must be passed explicitly since the MCP process runs in an isolated environment.
+
+Verify the server is running:
+
+```bash
+claude mcp list
+# nobel-prize: php ... - ✓ Connected
+```
+
+### Adding to Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "nobel-prize": {
+      "command": "php",
+      "args": ["/absolute/path/to/bin/mcp-server.php"],
+      "env": {
+        "OPENAI_API_KEY": "your-key",
+        "OPENAI_API_BASE_URL": "https://api.openai.com/v1",
+        "OPENAI_CHAT_MODEL": "gpt-4o-mini",
+        "OPENAI_EMBEDDING_MODEL": "text-embedding-3-small"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Desktop after saving. The Nobel Prize tools will appear in the tools menu.
+
+### Example usage in Claude
+
+Once connected, you can ask Claude to use the tools directly:
+
+> *Use the `ask` tool: which women won the physics prize?*
+
+> *Use the `search` tool to find peace prize winners from Japan*
+
+> *Use the `hybrid_search` tool: breakthroughs in genetics*
+
+---
+
+## API Reference
+
+### Search
+
+```
+GET /api.php?q=einstein&mode=keyword
+GET /api.php?q=quantum+mechanics&mode=semantic
+GET /api.php?q=einstein&mode=hybrid
+```
+
+Parameters: `q`, `mode` (keyword/semantic/hybrid), `category`, `gender`, `birth_country`, `prize_country`, `year_from`, `year_to`, `page`, `per_page`
+
+### Ask AI
+
+```
+GET /api.php?ask=Which+women+won+the+physics+prize
+```
+
+Returns: `{ answer, sources[], question, mode: "rag" }`
+
+### Document detail
+
+```
+GET /api.php?id={document-id}
+```
+
+---
 
 ## Project Structure
 
 ```
 .
-├── bin/                           # CLI scripts
-│   ├── setup.php                  # Create index with mappings
-│   ├── index.php                  # Fetch and index Nobel Prize data
-│   ├── search.php                 # Command-line search
-│   ├── setup-template.php         # Configure search template
-│   └── manage-templates.php       # List/view/delete templates
-├── public/                        # Web application
-│   ├── index.php                  # Main UI (auto-configured from .env)
-│   ├── api.php                    # REST API endpoint
-│   └── search-api-template.php    # Serves template as JSON for frontend
-├── src/
-│   ├── Client/
-│   │   └── ElasticsearchClient.php      # HTTP client with Basic Auth
-│   ├── Config/
-│   │   └── Config.php                    # Manages credentials and index prefix
-│   ├── Data/
-│   │   ├── NobelDataFetcher.php          # Fetches from Nobel Prize API
-│   │   └── NobelDataTransformer.php      # Normalizes and structures data
-│   ├── Index/
-│   │   ├── IndexManager.php              # Create/delete/list indexes
-│   │   └── BulkIndexer.php               # Bulk operations (NDJSON format)
-│   ├── Mapping/
-│   │   └── NobelPrizeMapping.php         # Field type definitions
-│   └── Search/
-│       ├── SearchService.php             # Query building and execution
-│       └── SearchTemplateManager.php     # Template CRUD operations
-├── .env.example                   # Environment variables template
-├── composer.json                  # PHP dependencies
-└── README.md                      # This file
+├── bin/
+│   ├── setup.php                  # Create index
+│   ├── index.php                  # Import Nobel Prize data
+│   ├── update-mapping.php         # Add vector field to existing index
+│   ├── generate-embeddings.php    # Generate and store vector embeddings
+│   ├── search.php                 # CLI keyword search
+│   ├── semantic-search.php        # CLI semantic/hybrid search
+│   ├── ask.php                    # CLI Ask AI (RAG)
+│   ├── mcp-server.php             # MCP server entry point
+│   ├── setup-template.php         # Create autosuggest template
+│   └── manage-templates.php       # Manage templates
+├── public/
+│   ├── index.php                  # Web interface (Search + Ask AI tabs)
+│   ├── api.php                    # REST API
+│   └── search-api-template.php    # Serves autosuggest template to frontend
+└── src/
+    ├── Client/ElasticsearchClient.php
+    ├── Config/Config.php
+    ├── Data/
+    │   ├── NobelDataFetcher.php
+    │   └── NobelDataTransformer.php
+    ├── Embeddings/
+    │   ├── EmbeddingProviderInterface.php
+    │   ├── OpenAIEmbeddingProvider.php    # Any OpenAI-compatible endpoint
+    │   ├── EmbeddingService.php           # Text composition + embedding
+    │   └── EmbeddingUpdater.php           # Scroll + bulk-update embeddings
+    ├── Index/
+    │   ├── IndexManager.php
+    │   └── BulkIndexer.php
+    ├── Mapping/NobelPrizeMapping.php
+    ├── MCP/
+    │   ├── McpServer.php                  # JSON-RPC 2.0 over stdio
+    │   └── ToolRegistry.php
+    ├── RAG/
+    │   ├── ChatProviderInterface.php
+    │   ├── OpenAIChatProvider.php         # Any OpenAI-compatible endpoint
+    │   └── RagService.php                 # 3-phase RAG pipeline
+    ├── Search/SearchService.php           # Keyword, semantic, hybrid search
+    ├── Search/SearchTemplateManager.php
+    └── Shared/
+        ├── HttpClientFactory.php          # Shared Guzzle client setup
+        └── ServiceFactory.php             # Assembles AI services from config
 ```
 
-## Key ElasticPress.io Differences
-
-### Index Naming
-**Standard Elasticsearch:**
-```
-my-index
-my-other-index
-```
-
-**ElasticPress.io:**
-```
-subscription-id-my-index
-subscription-id-my-other-index
-```
-The subscription ID prefix is mandatory and automatically added by `Config::getIndexPrefix()`.
-
-### Bulk Indexing
-**Standard Elasticsearch:**
-```json
-{"index": {"_index": "my-index", "_id": "123"}}
-{"field": "value"}
-```
-
-**ElasticPress.io:**
-```json
-{"index": {"_id": "123"}}
-{"field": "value"}
-```
-The `_index` field is disallowed; specify index in URL: `POST /{index}/_bulk`
-
-### Authentication
-**Standard Elasticsearch:**
-- API keys, or
-- Username/password, or
-- No auth (local dev)
-
-**ElasticPress.io:**
-- HTTP Basic Auth with Subscription ID as username, Token as password
-- Required for all requests except template-based searches
-
-### Search Templates
-**Standard Elasticsearch:**
-- Stored scripts or search templates
-- Full query DSL available
-
-**ElasticPress.io:**
-- Template API: `PUT /api/v1/search/posts/{index}/template`
-- Uses `{{ep_placeholder}}` syntax for parameter substitution
-- `/api/v1/search/posts/{index}` endpoint has stricter parameter validation
-- No authentication required for template-based searches
-- Enables secure, public-facing autocomplete functionality
-
-## API Reference
-
-### REST API Endpoint
-
-**Search Documents:**
-```
-GET /api.php?q=einstein&category=physics&year_from=2000
-```
-
-Query Parameters:
-- `q` - Search query string
-- `category` - Filter by prize category
-- `gender` - Filter by gender
-- `year_from` - Filter by minimum year
-- `year_to` - Filter by maximum year
-- `page` - Page number (default: 1)
-- `per_page` - Results per page (default: 20, max: 100)
-
-**Get Document Details:**
-```
-GET /api.php?id={document-id}
-```
-
-Returns complete laureate information including affiliations and all available fields.
-
-## Command-Line Usage
-
-### Search
-```bash
-# Simple search
-php bin/search.php "einstein"
-
-# With filters
-php bin/search.php "physics" --category=physics
-php bin/search.php --category=chemistry --year-from=2000
-php bin/search.php "marie" --gender=female
-```
-
-### Manage Templates
-```bash
-# List all templates
-php bin/manage-templates.php list
-
-# View specific template
-php bin/manage-templates.php view {index-name}
-
-# Delete template
-php bin/manage-templates.php delete {index-name}
-```
+---
 
 ## Troubleshooting
 
-### "explicit index in bulk is not allowed"
-ElasticPress.io doesn't accept `_index` in bulk operation metadata.
+**`explicit index in bulk is not allowed`**
+ElasticPress.io requires the `_index` field to be omitted from bulk metadata. The index is specified in the URL. See `src/Index/BulkIndexer.php`.
 
-**Solution:** Specify the index in the URL and omit `_index` from the action metadata.
+**Semantic search returns 0 results**
+Embeddings have not been generated yet. Run `php bin/generate-embeddings.php`.
 
-### Connection errors
-- Verify credentials in `.env`
-- Ensure host URL starts with `https://`
-- Check subscription is active
-- Test with: `curl -u "subscription-id:token" https://your-host/`
+**Ask AI returns no results**
+- Confirm `OPENAI_API_KEY` is set in `.env`
+- Confirm embeddings are generated (`php bin/generate-embeddings.php`)
+- Run `php bin/ask.php "your question" --verbose` to see what filters and strategies were used
 
-### No search results
-- Confirm indexing completed: `php bin/index.php` should show "successful" count
-- Check index exists: `php bin/manage-templates.php list`
-- Try search without filters first
-- Verify document structure matches mapping
+**MCP server fails to connect**
+- Ensure PHP is in your `PATH` or use the absolute path in the `command` field
+- Check ElasticPress.io credentials are in `.env` (MCP reads them from there)
+- Pass OpenAI credentials explicitly via `env` in the MCP config (they are not inherited from the shell)
+- Test the server directly: `echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | php bin/mcp-server.php`
 
-### Autosuggest/typeahead not working
-- Ensure template was created: `php bin/setup-template.php`
-- Check browser console for errors
-- Verify API endpoint URL in page source
-- Test template endpoint directly in browser dev tools
+**Changing the embedding model**
+If you change `OPENAI_EMBEDDING_MODEL` or `OPENAI_EMBEDDING_DIMS`, you must recreate the index and regenerate all embeddings — the vector dimensions are fixed in the mapping and cannot be changed in place.
 
-## Credits and Resources
+---
 
-- **Data Source:** [Nobel Prize API v2.1](https://www.nobelprize.org/about/developer-zone-2/) by Nobel Prize Outreach
-- **Service:** [ElasticPress.io](https://www.elasticpress.io/) - Managed Elasticsearch service
-- **Documentation:**
-  - [ElasticPress.io Developer Documentation](https://www.elasticpress.io/resources/section/developer-documentation/)
-  - [ElasticPress.io Resources](https://www.elasticpress.io/resources/articles/)
-  - [ElasticPress.io Post Search API](https://www.elasticpress.io/resources/articles/instant-results-post-search-api/)
-  - [Elasticsearch Query DSL](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl.html)
-  - [Elasticsearch Bulk API](https://www.elastic.co/guide/en/elasticsearch/reference/current/docs-bulk.html)
+## Resources
+
+- [ElasticPress.io](https://www.elasticpress.io/) — Managed Elasticsearch service
+- [ElasticPress.io Developer Documentation](https://www.elasticpress.io/resources/section/developer-documentation/)
+- [ElasticPress.io Post Search API](https://www.elasticpress.io/resources/articles/instant-results-post-search-api/)
+- [Model Context Protocol](https://modelcontextprotocol.io)
+- [Nobel Prize API v2.1](https://www.nobelprize.org/about/developer-zone-2/)
+
+---
 
 ## License
 
@@ -340,9 +388,7 @@ MIT
 
 ## Support Level
 
-**Provided as-is:** This sample project is provided as-is and we do not provide support for this project. It is merely sample code to explain how to interact with ElasticPress. If you need engineering consulting don't hesitate to ask about [ElasticPress.io Consulting](https://www.elasticpress.io/elasticpress-consulting/)
-
-## Like what you see?
+**Provided as-is.** This is a sample project with no support commitment. For engineering consulting enquiries visit [ElasticPress.io Consulting](https://www.elasticpress.io/elasticpress-consulting/).
 
 <p align="center">
 <a href="https://10up.com/contact/"><img src="https://10up.com/uploads/2016/10/10up-Github-Banner.png" width="850"></a>
