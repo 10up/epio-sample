@@ -71,6 +71,15 @@ The Nobel Prize database has these structured filter fields:
 - year_from: integer
 - year_to: integer
 
+Important field notes:
+- birth_country stores historical full country names (e.g. "Germany", "France", "United States").
+  For nationality/country-of-birth questions put the country name in "keywords" — this searches the
+  birth_country_name text field and correctly matches historical variants (Germany, West Germany, etc.).
+  Do NOT put birth country in filters.
+- prize_country stores ISO-2 institution codes (US, DE, GB…) and CAN be used as a filter.
+- category values are: Physics | Chemistry | Physiology or Medicine | Literature | Peace | Economic Sciences
+- gender values are: female | male | org
+
 Use "aggregate_by" when the question asks for counts, rankings, or "most/least/how many" across a dimension:
 - "aggregate_by": "laureate"       → count prizes per individual (most prizes won by one person)
 - "aggregate_by": "birth_country"  → count prizes per birth country
@@ -86,7 +95,7 @@ Question: "What contributions did women make to physics?"
 {"keywords":"","filters":{"category":"Physics","gender":"female"},"semantic_query":"female physicists Nobel Prize contributions"}
 
 Question: "Which German-born scientists won the chemistry prize?"
-{"keywords":"","filters":{"category":"Chemistry","birth_country":"DE"},"semantic_query":"German chemists Nobel Prize discoveries"}
+{"keywords":"Germany","filters":{"category":"Chemistry"},"semantic_query":"German chemists Nobel Prize discoveries"}
 
 Question: "Peace prize winners in the 21st century"
 {"keywords":"","filters":{"category":"Peace","year_from":2000},"semantic_query":"Nobel Peace Prize 21st century laureates"}
@@ -107,7 +116,10 @@ Question: "which person won the most Nobel prizes"
 {"keywords":"","filters":{},"semantic_query":"laureate multiple Nobel Prizes","aggregate_by":"laureate"}
 
 Question: "which country produced the most physics Nobel laureates"
-{"keywords":"","filters":{"category":"Physics"},"semantic_query":"Nobel physics prize countries","aggregate_by":"birth_country"}
+{"keywords":"","filters":{"category":"Physics"},"semantic_query":"Nobel physics prize countries by nationality","aggregate_by":"birth_country"}
+
+Question: "which german people got Nobel prizes"
+{"keywords":"Germany","filters":{},"semantic_query":"German Nobel Prize laureates born in Germany"}
 
 Question: "how many prizes were awarded per year in the 2000s"
 {"keywords":"","filters":{"year_from":2000,"year_to":2009},"semantic_query":"Nobel prizes per year","aggregate_by":"year"}
@@ -293,9 +305,13 @@ PROMPT;
             $filters['gender'] = strtolower($raw['gender']);
         }
 
-        if (!empty($raw['birth_country']) && preg_match('/^[A-Za-z]{2}$/', $raw['birth_country'])) {
-            $filters['birth_country'] = strtoupper($raw['birth_country']);
+        // birth_country stores full historical names ("Germany", "West Germany"…).
+        // The prompt directs the LLM to put nationality in keywords instead;
+        // this is a safety-net for well-formed full names passed as a filter.
+        if (!empty($raw['birth_country']) && is_string($raw['birth_country'])) {
+            $filters['birth_country'] = $raw['birth_country'];
         }
+        // prize_country stores ISO-2 codes (institution/affiliation country).
         if (!empty($raw['prize_country']) && preg_match('/^[A-Za-z]{2}$/', $raw['prize_country'])) {
             $filters['prize_country'] = strtoupper($raw['prize_country']);
         }
@@ -325,10 +341,13 @@ PROMPT;
     ): array {
         $aggregateBy = $queryPlan['aggregate_by'];
         $filters     = $queryPlan['filters'];
+        $keywords    = $queryPlan['keywords'];
 
         // Fetch enough documents to compute the aggregation accurately.
-        // We use the filter-only search with a high limit.
-        $result  = $this->searchService->search($indexName, '', $filters, 0, 2000);
+        // Apply both filters and keywords so the aggregation is scoped to
+        // the relevant subset (e.g. "most German laureates" should only count
+        // documents matching Germany, not the full dataset).
+        $result  = $this->searchService->search($indexName, $keywords, $filters, 0, 2000);
         $sources = $this->extractSources($result);
 
         if ($debugCallback !== null) {
