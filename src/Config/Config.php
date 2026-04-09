@@ -65,6 +65,15 @@ class Config
                 // Default to subscription_id with trailing dash for ElasticPress.io naming
                 'prefix' => $subscriptionId ? $subscriptionId . '-' : '',
             ],
+            'openai' => [
+                // Any OpenAI-compatible base URL: OpenAI, Ollama, LM Studio, Groq, Azure, etc.
+                'api_base_url'    => rtrim($_ENV['OPENAI_API_BASE_URL'] ?? 'https://api.openai.com/v1', '/'),
+                'api_key'         => $_ENV['OPENAI_API_KEY'] ?? '',
+                'embedding_model' => $_ENV['OPENAI_EMBEDDING_MODEL'] ?? 'text-embedding-3-small',
+                'chat_model'      => $_ENV['OPENAI_CHAT_MODEL'] ?? 'gpt-4o-mini',
+                // Must match the model's actual output dimensions (changing requires re-indexing)
+                'dimensions'      => (int) ($_ENV['OPENAI_EMBEDDING_DIMS'] ?? 1536),
+            ],
         ];
     }
 
@@ -136,6 +145,48 @@ class Config
     public function getIndexPrefix(): string
     {
         return $this->get('index.prefix', '');
+    }
+
+    /**
+     * Get the base URL for the OpenAI-compatible API.
+     * Compatible with OpenAI, Ollama, LM Studio, Groq, Azure OpenAI, and any OpenAI-compatible service.
+     */
+    public function getOpenAIApiBaseUrl(): string
+    {
+        return $this->get('openai.api_base_url', 'https://api.openai.com/v1');
+    }
+
+    /**
+     * Get the OpenAI-compatible API key.
+     */
+    public function getOpenAIApiKey(): string
+    {
+        return $this->get('openai.api_key', '');
+    }
+
+    /**
+     * Get the embedding model name.
+     */
+    public function getOpenAIEmbeddingModel(): string
+    {
+        return $this->get('openai.embedding_model', 'text-embedding-3-small');
+    }
+
+    /**
+     * Get the chat completion model name.
+     */
+    public function getOpenAIChatModel(): string
+    {
+        return $this->get('openai.chat_model', 'gpt-4o-mini');
+    }
+
+    /**
+     * Get the embedding vector dimensions.
+     * Must match what the configured embedding model produces.
+     */
+    public function getOpenAIEmbeddingDimensions(): int
+    {
+        return (int) $this->get('openai.dimensions', 1536);
     }
 
     /**

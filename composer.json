@@ -32,7 +32,12 @@
         "index": "php bin/index.php",
         "search": "php bin/search.php",
         "setup-template": "php bin/setup-template.php",
-        "manage-templates": "php bin/manage-templates.php"
+        "manage-templates": "php bin/manage-templates.php",
+        "update-mapping": "php bin/update-mapping.php",
+        "generate-embeddings": "php bin/generate-embeddings.php",
+        "semantic-search": "php bin/semantic-search.php",
+        "ask": "php bin/ask.php",
+        "mcp-server": "php bin/mcp-server.php"
     },
     "config": {
         "optimize-autoloader": true,

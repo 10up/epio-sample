@@ -189,6 +189,19 @@ class NobelPrizeMapping
                 'prize_countries' => [
                     'type' => 'keyword', // Flattened list of all affiliation countries for easier faceting
                 ],
+
+                // Vector embedding for semantic / kNN search
+                // Generated from: "{category} {fullname} ({year}): {motivation}. Affiliated with: ..."
+                // index: true builds the HNSW graph required for ES 8.x knn queries.
+                // similarity: cosine is standard for text embeddings (direction matters, magnitude does not).
+                // WARNING: dims must match OPENAI_EMBEDDING_DIMS. Changing it requires re-creating the index
+                // and regenerating all embeddings — it cannot be updated in place.
+                'motivation_embedding' => [
+                    'type'       => 'dense_vector',
+                    'dims'       => 1536,
+                    'index'      => true,
+                    'similarity' => 'cosine',
+                ],
             ],
         ];
     }
@@ -213,6 +226,28 @@ class NobelPrizeMapping
                         'type' => 'standard',
                         'stopwords' => '_english_',
                     ],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Get the mapping patch for adding the vector embedding field to an existing index.
+     *
+     * Use this with IndexManager::updateMappings() when you want to add semantic
+     * search support without re-creating the entire index.
+     *
+     * @return array Partial mapping to be PUT to /{index}/_mapping
+     */
+    public static function getEmbeddingMappingPatch(): array
+    {
+        return [
+            'properties' => [
+                'motivation_embedding' => [
+                    'type'       => 'dense_vector',
+                    'dims'       => 1536,
+                    'index'      => true,
+                    'similarity' => 'cosine',
                 ],
             ],
         ];
