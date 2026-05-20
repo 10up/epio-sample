@@ -569,7 +569,45 @@ try {
         .modal-affiliations li:last-child {
             border-bottom: none;
         }
+        /* ── Markdown content tables ────────────────────────────── */
+
+        .markdown-content table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 12px 0;
+            font-size: 13px;
+        }
+
+        .markdown-content th,
+        .markdown-content td {
+            border: 1px solid #ddd;
+            padding: 8px 10px;
+            text-align: left;
+        }
+
+        .markdown-content th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
+
+        .markdown-content tr:nth-child(even) { background: #fafafa; }
+
+        .markdown-content ol,
+        .markdown-content ul {
+            margin: 8px 0;
+            padding-left: 24px;
+        }
+
+        .markdown-content li { margin: 4px 0; }
+
+        .markdown-content h2,
+        .markdown-content h3 {
+            margin: 16px 0 8px;
+        }
+
+        .markdown-content p { margin: 8px 0; }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
 </head>
 <body>
     <header>
@@ -963,49 +1001,9 @@ try {
             }
         }
 
-        // ── Simple markdown renderer ──────────────────────────────────────────
-
         function renderMarkdown(text) {
             if (!text) return '';
-            let html = escapeHtml(text);
-
-            // Headings
-            html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-            html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-
-            // Bold and italic
-            html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-            html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-            // Numbered lists: collect consecutive `1. item` lines into <ol>
-            html = html.replace(/((?:^\d+\. .+\n?)+)/gm, (block) => {
-                const items = block.trim().split('\n')
-                    .map(l => l.replace(/^\d+\. /, '').trim())
-                    .map(l => `<li>${l}</li>`)
-                    .join('');
-                return `<ol>${items}</ol>`;
-            });
-
-            // Unordered lists
-            html = html.replace(/((?:^[-*] .+\n?)+)/gm, (block) => {
-                const items = block.trim().split('\n')
-                    .map(l => l.replace(/^[-*] /, '').trim())
-                    .map(l => `<li>${l}</li>`)
-                    .join('');
-                return `<ul>${items}</ul>`;
-            });
-
-            // Paragraphs: double newlines become paragraph breaks
-            html = html.replace(/\n\n+/g, '</p><p>');
-            html = html.replace(/\n/g, '<br>');
-            html = `<p>${html}</p>`;
-
-            // Clean up empty paragraphs and paragraphs around block elements
-            html = html.replace(/<p>\s*(<(?:h[23]|ul|ol)>)/g, '$1');
-            html = html.replace(/(<\/(?:h[23]|ul|ol)>)\s*<\/p>/g, '$1');
-            html = html.replace(/<p>\s*<\/p>/g, '');
-
-            return html;
+            return marked.parse(text);
         }
 
         // ── Search mode toggle ──────────────────────────────────────────────────
