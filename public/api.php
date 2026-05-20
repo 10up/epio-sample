@@ -77,9 +77,9 @@ try {
     if (!empty($_GET['ask'])) {
         $question = trim($_GET['ask']);
 
-        $ragService = ServiceFactory::ragService($config);
+        $ragService = ServiceFactory::ragService($config, $indexName);
 
-        $result = $ragService->ask($indexName, $question);
+        $result = $ragService->ask($question);
 
         // Deduplicate sources by document id
         $seen    = [];

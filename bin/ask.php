@@ -3,12 +3,11 @@
 declare(strict_types=1);
 
 /**
- * Ask a question about Nobel Prize data using an agentic RAG approach.
+ * Ask a question about Nobel Prize data using text-to-Elasticsearch RAG.
  *
- * The language model autonomously decides which search tools to call and
- * how to filter them — you do not need to specify filters manually.
- * For example: "What contributions did women make to physics?" will cause
- * the LLM to search with {gender: "female", category: "physics"} on its own.
+ * The LLM reads the index mapping, composes the optimal ES query (aggregations,
+ * sorts, filters, knn), executes it, then synthesizes an answer from the results.
+ * This approach adapts to any index without code changes.
  *
  * Prerequisites:
  *   - Run bin/generate-embeddings.php to populate motivation_embedding fields.
@@ -39,15 +38,15 @@ try {
     foreach (array_slice($argv, 1) as $arg) {
         if ($arg === '--help' || $arg === '-h') {
             echo "Usage: php bin/ask.php \"Your question here\" [--verbose]\n\n";
-            echo "The AI will automatically decide what to search for and how to filter results.\n";
+            echo "The AI reads the index schema and writes the optimal Elasticsearch query.\n";
             echo "No manual filter flags needed — just ask naturally.\n\n";
             echo "Options:\n";
-            echo "  --verbose   Show each tool call the AI makes (useful for debugging)\n\n";
+            echo "  --verbose   Show the generated ES query and execution details\n\n";
             echo "Examples:\n";
             echo "  php bin/ask.php \"What contributions did women make to physics?\"\n";
             echo "  php bin/ask.php \"Which German-born scientists won the chemistry prize?\"\n";
-            echo "  php bin/ask.php \"Who won the peace prize for nuclear disarmament?\"\n";
-            echo "  php bin/ask.php \"What breakthroughs in cancer research won Nobel Prizes?\" --verbose\n";
+            echo "  php bin/ask.php \"Who won the last Nobel Prize?\"\n";
+            echo "  php bin/ask.php \"What areas are most common in medicine prizes?\" --verbose\n";
             exit(0);
         } elseif ($arg === '--verbose' || $arg === '-v') {
             $verbose = true;
@@ -62,11 +61,10 @@ try {
         exit(0);
     }
 
-    $ragService = ServiceFactory::ragService($config);
+    $indexName = $config->getIndexPrefix() . 'laureates';
+    $ragService = ServiceFactory::ragService($config, $indexName);
 
     // ── Ask ───────────────────────────────────────────────────────────────────
-
-    $indexName = $config->getIndexPrefix() . 'laureates';
 
     echo "Question: \"{$question}\"\n";
     echo "Thinking...\n\n";
@@ -74,28 +72,24 @@ try {
     $debugCallback = null;
     if ($verbose) {
         $debugCallback = function (string $phase, mixed $data) {
-            if ($phase === 'query_plan') {
-                echo "  [phase 1] query understanding:\n";
-                echo "            keywords:      " . (json_encode($data['keywords'] ?: '(none)')) . "\n";
-                echo "            filters:       " . (empty($data['filters']) ? '(none)' : json_encode($data['filters'])) . "\n";
-                echo "            semantic_query: " . json_encode($data['semantic_query']) . "\n";
-            } elseif ($phase === 'retrieval') {
-                $summary = [];
-                foreach ($data as $strategy => $count) {
-                    $summary[] = "{$strategy}: {$count}";
-                }
-                echo "  [phase 2] retrieval: " . implode(', ', $summary) . "\n";
-            } elseif ($phase === 'fused') {
-                echo "  [phase 2b] RRF fused: {$data} unique documents\n";
-            } elseif ($phase === 'context') {
-                echo "  [phase 2c] context:  {$data['count']} documents ({$data['type']})\n";
-            } elseif ($phase === 'aggregate') {
-                echo "  [aggregate] computing: count_by_{$data}\n";
+            if ($phase === 'schema') {
+                echo "  [schema] Index fields loaded\n";
+            } elseif ($phase === 'query') {
+                echo "  [query] Generated ES query:\n";
+                echo "  " . json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n\n";
+            } elseif ($phase === 'retry') {
+                echo "  [retry] ES error: {$data['error']}\n";
+                echo "  [retry] Attempting fix (attempt {$data['attempt']})...\n";
+            } elseif ($phase === 'query_fixed') {
+                echo "  [fixed] Corrected query:\n";
+                echo "  " . json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n\n";
+            } elseif ($phase === 'result_summary') {
+                echo "  [results] Hits: {$data['hits']}, Has aggregations: " . ($data['aggs'] ? 'yes' : 'no') . "\n\n";
             }
         };
     }
 
-    $result = $ragService->ask($indexName, $question, $debugCallback);
+    $result = $ragService->ask($question, $debugCallback);
 
     // ── Display answer ────────────────────────────────────────────────────────
 
@@ -105,20 +99,21 @@ try {
     echo $result['answer'] . "\n";
     echo str_repeat('=', 60) . "\n\n";
 
-    // Display unique sources
-    $seen    = [];
-    $sources = [];
-    foreach ($result['sources'] as $s) {
-        $id = $s['id'] ?? ($s['fullname'] ?? '');
-        if (!isset($seen[$id])) {
-            $seen[$id] = true;
-            $sources[] = $s;
-        }
-    }
-
+    // Display sources if documents were returned
+    $sources = $result['sources'] ?? [];
     if (!empty($sources)) {
-        echo "Sources (" . count($sources) . " unique documents):\n\n";
-        foreach ($sources as $i => $source) {
+        $seen = [];
+        $unique = [];
+        foreach ($sources as $s) {
+            $id = $s['id'] ?? ($s['fullname'] ?? json_encode($s));
+            if (!isset($seen[$id])) {
+                $seen[$id] = true;
+                $unique[] = $s;
+            }
+        }
+
+        echo "Sources (" . count($unique) . " documents):\n\n";
+        foreach (array_slice($unique, 0, 20) as $i => $source) {
             $fullname   = $source['fullname'] ?? 'Unknown';
             $category   = ucfirst($source['category'] ?? '');
             $year       = $source['year'] ?? '';
@@ -131,6 +126,9 @@ try {
                 echo "       {$motivation}\n";
             }
             echo "\n";
+        }
+        if (count($unique) > 20) {
+            echo "  ... and " . (count($unique) - 20) . " more.\n";
         }
     }
 

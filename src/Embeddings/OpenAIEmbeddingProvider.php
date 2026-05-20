@@ -82,15 +82,10 @@ class OpenAIEmbeddingProvider implements EmbeddingProviderInterface
 
         for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
             $body = [
-                'model' => $this->model,
-                'input' => $inputs,
+                'model'      => $this->model,
+                'input'      => $inputs,
+                'dimensions' => $this->dimensions,
             ];
-
-            // Pass dimensions only when the model supports it (OpenAI text-embedding-3-*)
-            // Other providers ignore unknown fields, so this is safe to always include.
-            if ($this->dimensions !== 1536) {
-                $body['dimensions'] = $this->dimensions;
-            }
 
             $response = $this->client->post('embeddings', [
                 'json' => $body,

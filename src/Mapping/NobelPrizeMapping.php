@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace ElasticPressIO\Sample\Mapping;
 
+use ElasticPressIO\Sample\Config\Config;
+
 /**
  * Defines the Elasticsearch mapping for Nobel Prize data.
  *
@@ -190,15 +192,9 @@ class NobelPrizeMapping
                     'type' => 'keyword', // Flattened list of all affiliation countries for easier faceting
                 ],
 
-                // Vector embedding for semantic / kNN search
-                // Generated from: "{category} {fullname} ({year}): {motivation}. Affiliated with: ..."
-                // index: true builds the HNSW graph required for ES 8.x knn queries.
-                // similarity: cosine is standard for text embeddings (direction matters, magnitude does not).
-                // WARNING: dims must match OPENAI_EMBEDDING_DIMS. Changing it requires re-creating the index
-                // and regenerating all embeddings — it cannot be updated in place.
                 'motivation_embedding' => [
                     'type'       => 'dense_vector',
-                    'dims'       => 1536,
+                    'dims'       => Config::getInstance()->getOpenAIEmbeddingDimensions(),
                     'index'      => true,
                     'similarity' => 'cosine',
                 ],
@@ -245,7 +241,7 @@ class NobelPrizeMapping
             'properties' => [
                 'motivation_embedding' => [
                     'type'       => 'dense_vector',
-                    'dims'       => 1536,
+                    'dims'       => Config::getInstance()->getOpenAIEmbeddingDimensions(),
                     'index'      => true,
                     'similarity' => 'cosine',
                 ],

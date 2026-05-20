@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace ElasticPressIO\Sample\Shared;
 
+use ElasticPressIO\Sample\Client\ElasticsearchClient;
 use ElasticPressIO\Sample\Config\Config;
 use ElasticPressIO\Sample\Embeddings\EmbeddingService;
 use ElasticPressIO\Sample\Embeddings\OpenAIEmbeddingProvider;
 use ElasticPressIO\Sample\RAG\OpenAIChatProvider;
 use ElasticPressIO\Sample\RAG\RagService;
-use ElasticPressIO\Sample\Search\SearchService;
 
 /**
  * Assembles application services from configuration.
@@ -67,14 +67,16 @@ class ServiceFactory
     /**
      * Build the RAG service with all its dependencies.
      *
+     * @param string $indexName Fully-qualified Elasticsearch index name
      * @throws \RuntimeException if OPENAI_API_KEY is not configured
      */
-    public static function ragService(Config $config): RagService
+    public static function ragService(Config $config, string $indexName): RagService
     {
         return new RagService(
             self::embeddingService($config),
-            new SearchService(),
-            self::chatProvider($config)
+            new ElasticsearchClient($config),
+            self::chatProvider($config),
+            $indexName
         );
     }
 }

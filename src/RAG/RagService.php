@@ -4,621 +4,389 @@ declare(strict_types=1);
 
 namespace ElasticPressIO\Sample\RAG;
 
+use ElasticPressIO\Sample\Client\ElasticsearchClient;
 use ElasticPressIO\Sample\Embeddings\EmbeddingService;
-use ElasticPressIO\Sample\Search\SearchService;
 
 /**
- * Retrieval-Augmented Generation (RAG) service for Nobel Prize data.
+ * Retrieval-Augmented Generation (RAG) service using text-to-Elasticsearch-DSL.
  *
- * Three-phase pipeline following established RAG patterns:
+ * The LLM reads the index mapping, composes the optimal ES query DSL
+ * (aggregations, sorts, knn, filters), executes it, then synthesizes
+ * an answer from the raw results. This adapts to any index schema
+ * without requiring per-dataset code changes.
  *
- * Phase 1 — Query Understanding
- *   A single LLM call extracts structured search parameters from the question:
- *   keywords for text search, structured filters (category, gender, country…),
- *   and a rephrased semantic query optimised for vector similarity.
+ * Pipeline:
+ *   1. Schema discovery — read the index mapping, present fields + types to the LLM
+ *   2. Query generation — LLM writes ES _search body JSON
+ *   3. Execution — POST to Elasticsearch (with one auto-retry on query errors)
+ *   4. Answer synthesis — LLM interprets hits/aggregations and produces a response
  *
- * Phase 2 — Multi-strategy Retrieval + Fusion
- *   Multiple Elasticsearch searches run with the extracted parameters:
- *   - Filter search: ensures complete recall for all filter-matching documents
- *   - Keyword search: high-precision text matching when keywords are present
- *   - Semantic search: conceptual coverage via kNN vector similarity
- *   Results are merged with Reciprocal Rank Fusion (RRF), a parameter-free
- *   algorithm that rewards documents appearing high across multiple result lists.
- *
- * Phase 3 — Grounded Answer Generation
- *   A single LLM call synthesises an answer from the top-K fused results.
- *   The system prompt strictly forbids using training knowledge.
- *
- * @see https://arxiv.org/abs/2009.01792 Reciprocal Rank Fusion
- * @see https://en.wikipedia.org/wiki/Retrieval-augmented_generation
+ * @see https://www.elastic.co/guide/en/elasticsearch/reference/current/search-search.html
  */
 class RagService
 {
-    /**
-     * RRF rank constant.
-     * @see https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf
-     */
-    private const RRF_K = 60;
+    private const MAX_RETRIES = 1;
 
-    /** Supported aggregation dimensions for analytical queries. */
-    private const VALID_AGGREGATIONS = ['laureate', 'birth_country', 'prize_country', 'category', 'year'];
+    private const QUERY_GENERATION_PROMPT = <<<'PROMPT'
+You are an Elasticsearch query expert. Given a user question and an index schema, write the optimal Elasticsearch query DSL to retrieve the data needed to answer the question.
 
-    /**
-     * Maximum documents fetched by the filter-only strategy.
-     * Large so enumerate queries ("which women won X") get all matching docs.
-     */
-    private const RETRIEVAL_K_FILTER = 100;
+Current date: {current_date}
+Index name: {index_name}
 
-    /** Candidates per semantic / keyword retrieval strategy */
-    private const RETRIEVAL_K_SEMANTIC = 15;
+## Index schema (field → type)
+{schema}
 
-    /**
-     * Maximum context documents sent to the LLM for synthesise queries.
-     * Enumerate queries bypass this and send all filtered results.
-     */
-    private const CONTEXT_K_SYNTHESIZE = 10;
+## Rules
+- Return ONLY a valid JSON object that can be sent to the Elasticsearch _search endpoint.
+- Always include "_source" to select only the fields needed for the answer (never include motivation_embedding).
+- Use "size": 0 when only aggregation results are needed.
+- Use aggregations (terms, stats, date_histogram, etc.) for counting, ranking, grouping, or "most/least" questions.
+- Use "sort" for temporal queries (most recent, oldest, first, last).
+- Use knn for semantic similarity searches (conceptual questions about motivations/topics).
+  knn format: {"field": "motivation_embedding", "query_vector": [PLACEHOLDER], "k": N, "num_candidates": N*10}
+  Write [PLACEHOLDER] as the literal string — it will be replaced with the actual vector before execution.
+  Only use knn when the question is about conceptual similarity of prize motivations/topics.
+- For keyword matching on text fields (names, motivations), use multi_match or match queries.
+- For exact matching on keyword fields (category, gender, birth_country, prize_countries), use term/terms filters.
+- Combine filters with bool queries. Put filters in the "filter" clause (no scoring needed).
+- For "how many" questions with no grouping, use size:0 with a match_all and rely on hits.total.
+- For questions about specific people, match on fullname or firstname+surname.
+- The field "year" is an integer (not a date). Use range queries for year filtering.
+- The field "birth_country" is a keyword with ISO-2 codes. Use "birth_country_name" (text) for country name matching.
+- The field "affiliations" is nested. Use nested queries to filter/match on affiliation fields.
+- Keep size reasonable: use 20-50 for listing questions, 200+ only if you need to scan many docs.
+- Prefer aggregations over fetching all documents when counting or ranking.
+- You can only aggregate on keyword fields or fields with a .keyword sub-field. Text-only fields (like "motivation") cannot be aggregated — fetch documents and let the synthesis step analyze their content instead.
+- When the question asks about topics/themes/areas (which are semantic, not a stored field), fetch the relevant documents with their motivations and let the answer synthesis step identify patterns.
+- Some documents have empty string values for text fields (e.g. organizations without a person name). When aggregating on fullname.keyword or similar, add "missing": "__none__" or a min_doc_count to exclude empty buckets, or use "exclude": "" to filter them out.
 
-    /** System prompt for Phase 1: query understanding */
-    private const UNDERSTANDING_PROMPT = <<<'PROMPT'
-You are a query parser for a Nobel Prize database.
-Given a question, return a JSON object with these keys: "keywords", "filters", "semantic_query", and optionally "aggregate_by".
+## Examples
 
-The Nobel Prize database has these structured filter fields:
-- category: Physics | Chemistry | Physiology or Medicine | Literature | Peace | Economic Sciences
-- gender: female | male | org
-- birth_country: ISO 3166-1 alpha-2 code (DE, US, FR, GB, PL, etc.)
-- prize_country: ISO 3166-1 alpha-2 code
-- year_from: integer
-- year_to: integer
+Question: "who won the last Nobel Prize"
+{"size":20,"sort":[{"year":"desc"}],"_source":["fullname","category","year","motivation","birth_country_name","gender"],"query":{"match_all":{}}}
 
-Important field notes:
-- birth_country stores historical full country names (e.g. "Germany", "France", "United States").
-  For nationality/country-of-birth questions put the country name in "keywords" — this searches the
-  birth_country_name text field and correctly matches historical variants (Germany, West Germany, etc.).
-  Do NOT put birth country in filters.
-- prize_country stores ISO-2 institution codes (US, DE, GB…) and CAN be used as a filter.
-- category values are: Physics | Chemistry | Physiology or Medicine | Literature | Peace | Economic Sciences
-- gender values are: female | male | org
+Question: "which country produced the most Nobel laureates"
+{"size":0,"aggs":{"by_country":{"terms":{"field":"birth_country_name.keyword","size":20}}},"query":{"match_all":{}}}
 
-Use "aggregate_by" when the question asks for counts, rankings, or "most/least/how many" across a dimension:
-- "aggregate_by": "laureate"       → count prizes per individual (most prizes won by one person)
-- "aggregate_by": "birth_country"  → count prizes per birth country
-- "aggregate_by": "prize_country"  → count prizes per institution country
-- "aggregate_by": "category"       → count prizes per category
-- "aggregate_by": "year"           → count prizes per year
-
-Return ONLY a JSON object, no other text.
-
-Here are examples:
-
-Question: "What contributions did women make to physics?"
-{"keywords":"","filters":{"category":"Physics","gender":"female"},"semantic_query":"female physicists Nobel Prize contributions"}
-
-Question: "Which German-born scientists won the chemistry prize?"
-{"keywords":"Germany","filters":{"category":"Chemistry"},"semantic_query":"German chemists Nobel Prize discoveries"}
-
-Question: "Peace prize winners in the 21st century"
-{"keywords":"","filters":{"category":"Peace","year_from":2000},"semantic_query":"Nobel Peace Prize 21st century laureates"}
-
-Question: "What breakthroughs in DNA research won Nobel Prizes?"
-{"keywords":"DNA genetics","filters":{},"semantic_query":"DNA genetics molecular biology Nobel Prize breakthroughs"}
+Question: "what areas are most common in medicine prizes in the last 10 years"
+{"size":50,"sort":[{"year":"desc"}],"_source":["fullname","category","year","motivation"],"query":{"bool":{"filter":[{"term":{"category":"Physiology or Medicine"}},{"range":{"year":{"gte":2016}}}]}}}
 
 Question: "Tell me about Marie Curie"
-{"keywords":"Marie Curie","filters":{},"semantic_query":"Marie Curie radioactivity Nobel Prize Poland"}
+{"size":10,"_source":["fullname","category","year","motivation","birth_country_name","gender","affiliations","birth_year"],"query":{"multi_match":{"query":"Marie Curie","fields":["fullname^3","firstname^2","surname^2"]}}}
 
-Question: "organisations that won the peace prize"
-{"keywords":"","filters":{"category":"Peace","gender":"org"},"semantic_query":"organizations institutions Nobel Peace Prize"}
+Question: "how many female Nobel laureates have there been"
+{"size":0,"query":{"bool":{"filter":[{"term":{"gender":"female"}}]}}}
 
-Question: "medicine prizes for cancer treatment after 2000"
-{"keywords":"cancer treatment","filters":{"category":"Physiology or Medicine","year_from":2000},"semantic_query":"cancer treatment therapy Nobel Prize medicine"}
+Question: "Nobel prizes related to quantum mechanics"
+{"size":20,"_source":["fullname","category","year","motivation"],"knn":{"field":"motivation_embedding","query_vector":"[PLACEHOLDER]","k":20,"num_candidates":200}}
+
+Question: "compare the number of physics vs chemistry prizes per decade"
+{"size":0,"query":{"bool":{"filter":[{"terms":{"category":["Physics","Chemistry"]}}]}},"aggs":{"by_category":{"terms":{"field":"category"},"aggs":{"by_decade":{"histogram":{"field":"year","interval":10}}}}}}
 
 Question: "which person won the most Nobel prizes"
-{"keywords":"","filters":{},"semantic_query":"laureate multiple Nobel Prizes","aggregate_by":"laureate"}
-
-Question: "which country produced the most physics Nobel laureates"
-{"keywords":"","filters":{"category":"Physics"},"semantic_query":"Nobel physics prize countries by nationality","aggregate_by":"birth_country"}
-
-Question: "which german people got Nobel prizes"
-{"keywords":"Germany","filters":{},"semantic_query":"German Nobel Prize laureates born in Germany"}
-
-Question: "how many prizes were awarded per year in the 2000s"
-{"keywords":"","filters":{"year_from":2000,"year_to":2009},"semantic_query":"Nobel prizes per year","aggregate_by":"year"}
+{"size":0,"aggs":{"by_person":{"terms":{"field":"fullname.keyword","size":10,"order":{"_count":"desc"}}}}}
 PROMPT;
 
-    /** System prompt for Phase 3: answer generation */
-    private const GENERATION_PROMPT = <<<'PROMPT'
-You are a research assistant for Nobel Prize history.
+    private const SYNTHESIS_PROMPT = <<<'PROMPT'
+You are a research assistant. Answer the user's question using ONLY the Elasticsearch results provided below.
 
-Answer the question using ONLY the context documents provided.
-Do not use your training knowledge to supplement or fill gaps.
-If the context covers the topic only partially, answer based on what is there and note that coverage may be incomplete.
-Do not invent or fabricate any facts, names, dates, or prizes.
-Cite each laureate you mention by full name, year, and prize category.
+Current date: {current_date}
+
+Rules:
+- Base your answer entirely on the provided results.
+- If the results contain aggregation buckets, interpret them (counts, rankings, distributions).
+- If the results contain document hits, synthesize information from them.
+- Cite laureates by full name, year, and prize category when relevant.
+- Be concise but thorough. Use lists or tables when they make the answer clearer.
+- If results are empty or insufficient, say so honestly.
+- Do not invent or fabricate any facts not present in the results.
+- Do not use your training knowledge to supplement the results.
+- Ignore aggregation buckets with empty string keys ("") — these are data artifacts (e.g. organizations without a person name), not real results.
+- If an aggregation returns zero buckets after filtering (e.g. bucket_selector), that means no results matched the criteria — state this clearly as "none found" rather than "insufficient data".
 PROMPT;
 
     public function __construct(
         private readonly EmbeddingService $embeddingService,
-        private readonly SearchService $searchService,
-        private readonly ChatProviderInterface $chatProvider
+        private readonly ElasticsearchClient $esClient,
+        private readonly ChatProviderInterface $chatProvider,
+        private readonly string $indexName
     ) {}
 
     /**
-     * Answer a question about Nobel Prize data using the three-phase RAG pipeline.
-     *
-     * @param string        $indexName     Fully-qualified index name (with prefix)
-     * @param string        $question      The user's question
-     * @param callable|null $debugCallback Optional fn(string $phase, mixed $data) for logging
-     * @return array{answer: string, sources: array[], question: string, query_plan: array}
+     * Answer a question by generating and executing an Elasticsearch query.
      */
-    public function ask(string $indexName, string $question, ?callable $debugCallback = null): array
+    public function ask(string $question, ?callable $debugCallback = null): array
     {
-        // ── Phase 1: Query Understanding ──────────────────────────────────────
+        // ── Step 1: Get index schema ──────────────────────────────────────────
 
-        $queryPlan = $this->understandQuery($question);
+        $schema = $this->getSchema();
 
-        if ($debugCallback !== null) {
-            $debugCallback('query_plan', $queryPlan);
+        if ($debugCallback) {
+            $debugCallback('schema', $schema);
         }
 
-        // ── Aggregate queries — short-circuit to a dedicated path ─────────────
+        // ── Step 2: Generate ES query ─────────────────────────────────────────
 
-        if (!empty($queryPlan['aggregate_by'])) {
-            if ($debugCallback !== null) {
-                $debugCallback('aggregate', $queryPlan['aggregate_by']);
-            }
-            return $this->handleAggregateQuery($indexName, $question, $queryPlan, $debugCallback);
+        $esQuery = $this->generateQuery($question, $schema);
+
+        // Resolve knn vector placeholder before execution
+        $esQuery = $this->resolveKnn($esQuery, $question);
+
+        if ($debugCallback) {
+            $debugCallback('query', $this->redactVector($esQuery));
         }
 
-        // ── Phase 2: Multi-strategy Retrieval ─────────────────────────────────
+        // ── Step 3: Execute query (with retry on error) ───────────────────────
 
-        $resultLists = $this->retrieve($indexName, $queryPlan);
+        $result = $this->executeWithRetry($question, $schema, $esQuery, $debugCallback);
 
-        if ($debugCallback !== null) {
-            $counts = array_map(fn($list) => count($list), $resultLists);
-            $debugCallback('retrieval', $counts);
-        }
-
-        // ── Phase 2b: Reciprocal Rank Fusion ──────────────────────────────────
-
-        $fused = $this->fuseWithRRF($resultLists);
-
-        // Enumerate queries (filter-only, no semantic keywords) should send all
-        // filtered results to the LLM so it can give a complete answer.
-        // Synthesize queries (semantic/conceptual) are capped to avoid padding
-        // the context with loosely-related documents.
-        $isEnumerateQuery = !empty($queryPlan['filters']) && empty($queryPlan['keywords']);
-        $context = $isEnumerateQuery
-            ? $fused
-            : array_slice($fused, 0, self::CONTEXT_K_SYNTHESIZE);
-
-        if ($debugCallback !== null) {
-            $debugCallback('fused', count($fused));
-            $debugCallback('context', [
-                'type'  => $isEnumerateQuery ? 'enumerate (all results)' : 'synthesize (top ' . self::CONTEXT_K_SYNTHESIZE . ')',
-                'count' => count($context),
+        if ($debugCallback) {
+            $debugCallback('result_summary', [
+                'hits'  => $result['hits']['total']['value'] ?? 0,
+                'aggs'  => !empty($result['aggregations']),
             ]);
         }
 
-        // ── Phase 3: Answer Generation ────────────────────────────────────────
+        // ── Step 4: Synthesize answer ─────────────────────────────────────────
 
-        $answer = $this->generateAnswer($question, $context, $isEnumerateQuery);
+        $answer = $this->synthesize($question, $result, $esQuery);
+
+        // Extract sources for display
+        $sources = $this->extractSources($result);
 
         return [
-            'answer'      => $answer,
-            'sources'     => $context,
-            'question'    => $question,
-            'query_plan'  => $queryPlan,
+            'answer'     => $answer,
+            'sources'    => $sources,
+            'question'   => $question,
+            'es_query'   => $this->redactVector($esQuery),
         ];
     }
 
-    // ── Phase 1 ───────────────────────────────────────────────────────────────
+    /**
+     * Get a simplified schema description from the index mapping.
+     */
+    private function getSchema(): string
+    {
+        $mapping = $this->esClient->get("/{$this->indexName}/_mapping");
+
+        $properties = $mapping[$this->indexName]['mappings']['properties'] ?? [];
+
+        return $this->flattenMapping($properties);
+    }
 
     /**
-     * Use the LLM to extract structured search parameters from the question.
-     *
-     * Returns an array with keys: keywords, filters, semantic_query.
+     * Flatten nested mapping into a readable "field: type" format.
      */
-    private function understandQuery(string $question): array
+    private function flattenMapping(array $properties, string $prefix = ''): string
     {
+        $lines = [];
+
+        foreach ($properties as $field => $config) {
+            $path = $prefix ? "{$prefix}.{$field}" : $field;
+            $type = $config['type'] ?? 'object';
+
+            // Skip the embedding vector from schema (too noisy)
+            if ($type === 'dense_vector') {
+                $lines[] = "{$path}: dense_vector (dims={$config['dims']}, for knn semantic search)";
+                continue;
+            }
+
+            if ($type === 'nested' || $type === 'object') {
+                $lines[] = "{$path}: {$type}";
+                if (!empty($config['properties'])) {
+                    $lines[] = $this->flattenMapping($config['properties'], $path);
+                }
+            } elseif ($type === 'keyword') {
+                $lines[] = "{$path}: keyword [aggregatable, sortable, filterable]";
+            } elseif ($type === 'integer' || $type === 'long' || $type === 'float' || $type === 'double') {
+                $lines[] = "{$path}: {$type} [aggregatable, sortable, filterable]";
+            } elseif ($type === 'date') {
+                $format = $config['format'] ?? '';
+                $lines[] = "{$path}: date ({$format}) [aggregatable, sortable, filterable]";
+            } elseif ($type === 'text') {
+                $hasKeyword = !empty($config['fields']['keyword']);
+                if ($hasKeyword) {
+                    $lines[] = "{$path}: text [full-text searchable, use {$path}.keyword for aggs/sort/filter]";
+                } else {
+                    $lines[] = "{$path}: text [full-text searchable only, NOT aggregatable]";
+                }
+            } else {
+                $lines[] = "{$path}: {$type}";
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * Ask the LLM to generate an Elasticsearch query.
+     */
+    private function generateQuery(string $question, string $schema): array
+    {
+        $prompt = str_replace(
+            ['{current_date}', '{index_name}', '{schema}'],
+            [date('Y-m-d'), $this->indexName, $schema],
+            self::QUERY_GENERATION_PROMPT
+        );
+
         $messages = [
-            ['role' => 'system', 'content' => self::UNDERSTANDING_PROMPT],
+            ['role' => 'system', 'content' => $prompt],
             ['role' => 'user',   'content' => $question],
         ];
 
         $raw = $this->chatProvider->complete($messages);
 
-        $plan = $this->parseJson($raw);
-
-        $aggregateBy = trim($plan['aggregate_by'] ?? '');
-
-        return [
-            'keywords'       => trim($plan['keywords'] ?? ''),
-            'filters'        => $this->sanitiseFilters($plan['filters'] ?? []),
-            'semantic_query' => trim($plan['semantic_query'] ?? $question),
-            'aggregate_by'   => in_array($aggregateBy, self::VALID_AGGREGATIONS) ? $aggregateBy : '',
-        ];
+        return $this->parseQuery($raw);
     }
 
     /**
-     * Parse JSON from an LLM response, tolerating markdown fences and extra text.
+     * Execute the query, retrying once if ES returns an error.
      */
-    private function parseJson(string $raw): array
+    private function executeWithRetry(string $question, string $schema, array $esQuery, ?callable $debugCallback): array
     {
-        // Strip markdown code fences if present
-        $raw = preg_replace('/^```(?:json)?\s*/m', '', $raw);
-        $raw = preg_replace('/```\s*$/m', '', $raw);
+        for ($attempt = 0; $attempt <= self::MAX_RETRIES; $attempt++) {
+            try {
+                $result = $this->esClient->post("/{$this->indexName}/_search", $esQuery);
+                return $result;
+            } catch (\RuntimeException $e) {
+                if ($attempt >= self::MAX_RETRIES) {
+                    throw $e;
+                }
 
-        // Try direct decode first
-        $decoded = json_decode(trim($raw), true);
-        if (is_array($decoded)) {
-            return $decoded;
-        }
+                if ($debugCallback) {
+                    $debugCallback('retry', ['error' => $e->getMessage(), 'attempt' => $attempt + 1]);
+                }
 
-        // Extract first JSON object from the text as a fallback
-        if (preg_match('/\{.*\}/s', $raw, $m)) {
-            $decoded = json_decode($m[0], true);
-            if (is_array($decoded)) {
-                return $decoded;
+                // Ask the LLM to fix the query
+                $esQuery = $this->fixQuery($question, $schema, $esQuery, $e->getMessage());
+                $esQuery = $this->resolveKnn($esQuery, $question);
+
+                if ($debugCallback) {
+                    $debugCallback('query_fixed', $this->redactVector($esQuery));
+                }
             }
         }
 
-        return [];
+        throw new \RuntimeException('Query execution failed after retries');
     }
 
     /**
-     * Validate and normalise filters extracted by the LLM.
-     *
-     * Maps common aliases and lowercase names to the exact keyword values
-     * stored in Elasticsearch (case-sensitive keyword fields).
-     *
-     * Actual stored category values (from ES aggregation):
-     *   Physics, Chemistry, Physiology or Medicine, Literature, Peace, Economic Sciences
+     * Replace knn placeholder vector with the actual embedding of the question.
      */
-    private function sanitiseFilters(array $raw): array
+    private function resolveKnn(array $query, string $question): array
     {
-        $filters = [];
-
-        // Map LLM category output (any casing/alias) to the exact stored keyword value
-        $categoryMap = [
-            'physics'                => 'Physics',
-            'chemistry'              => 'Chemistry',
-            'medicine'               => 'Physiology or Medicine',
-            'physiology'             => 'Physiology or Medicine',
-            'physiology or medicine' => 'Physiology or Medicine',
-            'medical'                => 'Physiology or Medicine',
-            'literature'             => 'Literature',
-            'peace'                  => 'Peace',
-            'economics'              => 'Economic Sciences',
-            'economic sciences'      => 'Economic Sciences',
-            'economic'               => 'Economic Sciences',
-        ];
-
-        if (!empty($raw['category'])) {
-            $key = strtolower(trim($raw['category']));
-            if (isset($categoryMap[$key])) {
-                $filters['category'] = $categoryMap[$key];
-            }
+        if (!isset($query['knn']['query_vector'])) {
+            return $query;
         }
 
-        $validGenders = ['male', 'female', 'org'];
-        if (!empty($raw['gender']) && in_array(strtolower($raw['gender']), $validGenders)) {
-            $filters['gender'] = strtolower($raw['gender']);
+        $vec = $query['knn']['query_vector'];
+        if (is_string($vec) || (is_array($vec) && empty($vec))) {
+            $query['knn']['query_vector'] = $this->embeddingService->embedQuery($question);
         }
 
-        // birth_country stores full historical names ("Germany", "West Germany"…).
-        // The prompt directs the LLM to put nationality in keywords instead;
-        // this is a safety-net for well-formed full names passed as a filter.
-        if (!empty($raw['birth_country']) && is_string($raw['birth_country'])) {
-            $filters['birth_country'] = $raw['birth_country'];
-        }
-        // prize_country stores ISO-2 codes (institution/affiliation country).
-        if (!empty($raw['prize_country']) && preg_match('/^[A-Za-z]{2}$/', $raw['prize_country'])) {
-            $filters['prize_country'] = strtoupper($raw['prize_country']);
-        }
-        if (!empty($raw['year_from']) && is_numeric($raw['year_from'])) {
-            $filters['year_from'] = (int) $raw['year_from'];
-        }
-        if (!empty($raw['year_to']) && is_numeric($raw['year_to'])) {
-            $filters['year_to'] = (int) $raw['year_to'];
-        }
-
-        return $filters;
+        return $query;
     }
 
-    // ── Aggregate queries ─────────────────────────────────────────────────────
+    /**
+     * Redact the large vector array for display/logging purposes.
+     */
+    private function redactVector(array $query): array
+    {
+        if (isset($query['knn']['query_vector']) && is_array($query['knn']['query_vector'])) {
+            $query['knn']['query_vector'] = '[vector:' . count($query['knn']['query_vector']) . 'd]';
+        }
+        return $query;
+    }
 
     /**
-     * Handle aggregate queries ("which person won the most", "count by country", etc.).
-     *
-     * Fetches all relevant documents, computes the aggregation in PHP (group + count),
-     * formats a compact summary, and asks the LLM to interpret it.
+     * Ask the LLM to fix a broken query based on the ES error message.
      */
-    private function handleAggregateQuery(
-        string $indexName,
-        string $question,
-        array $queryPlan,
-        ?callable $debugCallback
-    ): array {
-        $aggregateBy = $queryPlan['aggregate_by'];
-        $filters     = $queryPlan['filters'];
-        $keywords    = $queryPlan['keywords'];
-
-        // Fetch enough documents to compute the aggregation accurately.
-        // Apply both filters and keywords so the aggregation is scoped to
-        // the relevant subset (e.g. "most German laureates" should only count
-        // documents matching Germany, not the full dataset).
-        $result  = $this->searchService->search($indexName, $keywords, $filters, 0, 2000);
-        $sources = $this->extractSources($result);
-
-        if ($debugCallback !== null) {
-            $debugCallback('retrieval', ['aggregate_fetch' => count($sources)]);
-        }
-
-        // Compute the aggregation in PHP
-        $aggregated = $this->computeAggregation($sources, $aggregateBy);
-
-        if ($debugCallback !== null) {
-            $debugCallback('fused', count($aggregated));
-        }
-
-        // Format a compact summary for the LLM (no motivation text needed)
-        $summaryLines = [];
-        $rank = 1;
-        foreach (array_slice($aggregated, 0, 50) as $group) {
-            $label = $group['label'];
-            $count = $group['count'];
-            $detail = $group['detail'] ?? '';
-            $summaryLines[] = "{$rank}. {$label}: {$count} prize(s)" . ($detail ? " ({$detail})" : '');
-            $rank++;
-        }
-
-        $totalGroups = count($aggregated);
-        $contextText = "Aggregation: count of Nobel Prizes by {$aggregateBy}\n"
-            . "Total groups: {$totalGroups}\n\n"
-            . implode("\n", $summaryLines);
-
-        if ($totalGroups > 50) {
-            $contextText .= "\n... and " . ($totalGroups - 50) . " more groups.";
-        }
-
-        // LLM interprets the aggregation result
+    private function fixQuery(string $question, string $schema, array $failedQuery, string $error): array
+    {
         $messages = [
-            ['role' => 'system', 'content' => self::GENERATION_PROMPT],
             [
-                'role'    => 'user',
-                'content' => "Aggregated data:\n\n{$contextText}\n\nQuestion: {$question}",
+                'role' => 'system',
+                'content' => str_replace(
+                    ['{current_date}', '{index_name}', '{schema}'],
+                    [date('Y-m-d'), $this->indexName, $schema],
+                    self::QUERY_GENERATION_PROMPT
+                ),
+            ],
+            ['role' => 'user', 'content' => $question],
+            ['role' => 'assistant', 'content' => json_encode($failedQuery, JSON_PRETTY_PRINT)],
+            [
+                'role' => 'user',
+                'content' => "That query returned an error: {$error}\n\nPlease fix the query and return only the corrected JSON.",
             ],
         ];
 
-        $answer = $this->chatProvider->complete($messages);
+        $raw = $this->chatProvider->complete($messages);
 
-        return [
-            'answer'     => $answer,
-            'sources'    => array_slice($sources, 0, 20), // representative sample for sidebar
-            'question'   => $question,
-            'query_plan' => $queryPlan,
-        ];
+        return $this->parseQuery($raw);
     }
 
     /**
-     * Group documents by a field and count occurrences, returning results
-     * sorted by count descending.
-     *
-     * @param array[] $sources Documents from extractSources()
-     * @param string  $by      Field to group by (laureate, birth_country, category, year, prize_country)
-     * @return array<string, array{label: string, count: int, detail: string}>
+     * Parse JSON query from LLM output.
      */
-    private function computeAggregation(array $sources, string $by): array
+    private function parseQuery(string $raw): array
     {
-        $groups = [];
+        $raw = preg_replace('/^```(?:json)?\s*/m', '', $raw);
+        $raw = preg_replace('/```\s*$/m', '', $raw);
 
-        foreach ($sources as $doc) {
-            switch ($by) {
-                case 'laureate':
-                    $id    = $doc['laureate_id'] ?? $doc['id'] ?? '';
-                    $label = $doc['fullname'] ?? ($doc['firstname'] ?? '') . ' ' . ($doc['surname'] ?? '');
-                    $detail = ($doc['category'] ?? '') . ' ' . ($doc['year'] ?? '');
-                    break;
-                case 'birth_country':
-                    $id     = $doc['birth_country'] ?? 'unknown';
-                    $label  = $doc['birth_country_name'] ?? $id;
-                    $detail = '';
-                    break;
-                case 'prize_country':
-                    $countries = $doc['prize_countries'] ?? [];
-                    foreach ((array) $countries as $c) {
-                        if (!isset($groups[$c])) {
-                            $groups[$c] = ['label' => $c, 'count' => 0, 'detail' => ''];
-                        }
-                        $groups[$c]['count']++;
-                    }
-                    continue 2;
-                case 'category':
-                    $id    = $doc['category'] ?? 'unknown';
-                    $label = $id;
-                    $detail = '';
-                    break;
-                case 'year':
-                    $id    = (string) ($doc['year'] ?? 'unknown');
-                    $label = $id;
-                    $detail = '';
-                    break;
-                default:
-                    continue 2;
-            }
+        $decoded = json_decode(trim($raw), true);
+        if (is_array($decoded)) {
+            return $this->normalizeQuery($decoded);
+        }
 
-            if (!isset($groups[$id])) {
-                $groups[$id] = ['label' => trim($label), 'count' => 0, 'detail' => ''];
-            }
-            $groups[$id]['count']++;
-
-            // Accumulate details (categories/years) for the laureate aggregation
-            if ($by === 'laureate' && $detail) {
-                $current = $groups[$id]['detail'];
-                $groups[$id]['detail'] = $current ? $current . ', ' . $detail : $detail;
+        if (preg_match('/\{.*\}/s', $raw, $m)) {
+            $decoded = json_decode($m[0], true);
+            if (is_array($decoded)) {
+                return $this->normalizeQuery($decoded);
             }
         }
 
-        // Sort by count descending
-        uasort($groups, fn($a, $b) => $b['count'] <=> $a['count']);
-
-        return $groups;
-    }
-
-    // ── Phase 2 ───────────────────────────────────────────────────────────────
-
-    /**
-     * Run multiple retrieval strategies and return their ranked result lists.
-     *
-     * @return array[] Array of result lists, each list ordered by relevance
-     */
-    private function retrieve(string $indexName, array $queryPlan): array
-    {
-        $lists    = [];
-        $keywords = $queryPlan['keywords'];
-        $filters  = $queryPlan['filters'];
-        $semQuery = $queryPlan['semantic_query'];
-
-        // Strategy A: filter-only search — guarantees complete recall for all
-        // structured constraints (gender, category, country, year).
-        // Uses a high limit so enumerate queries get all matching documents.
-        if (!empty($filters)) {
-            $result = $this->searchService->search($indexName, '', $filters, 0, self::RETRIEVAL_K_FILTER);
-            if ($result['total'] > 0) {
-                $lists['filtered'] = $this->extractSources($result);
-            }
-        }
-
-        // Strategy B: keyword search — high precision for names and specific terms.
-        // Only run when keywords are non-trivial (skip for generic descriptions).
-        if ($keywords !== '' && !$this->isGenericQuery($keywords)) {
-            $result = $this->searchService->search($indexName, $keywords, $filters, 0, self::RETRIEVAL_K_SEMANTIC);
-            if ($result['total'] > 0) {
-                $lists['keyword'] = $this->extractSources($result);
-            }
-        }
-
-        // Strategy C: semantic search — conceptual coverage.
-        // Only adds value for synthesize queries; for enumerate queries the
-        // filter strategy already has complete recall. We still run it so that
-        // results from all strategies can be merged via RRF.
-        try {
-            $queryVector = $this->embeddingService->embedQuery($semQuery);
-            $result = $this->searchService->semanticSearch(
-                $indexName,
-                $queryVector,
-                $filters,
-                self::RETRIEVAL_K_SEMANTIC,
-                self::RETRIEVAL_K_SEMANTIC * 10
-            );
-            if ($result['total'] > 0) {
-                $lists['semantic'] = $this->extractSources($result);
-            }
-        } catch (\Throwable) {
-            // Semantic search requires embeddings — gracefully skip if unavailable
-        }
-
-        return $lists;
+        throw new \RuntimeException("Failed to parse LLM output as JSON: " . substr($raw, 0, 200));
     }
 
     /**
-     * Extract document source arrays from a SearchService result.
-     * Removes the large embedding vector.
-     *
-     * @return array[] Ordered array of source documents
+     * Fix json_decode(assoc:true) converting {} to [] for ES clauses that require objects.
      */
-    private function extractSources(array $searchResult): array
+    private function normalizeQuery(array $data): array
     {
-        return array_map(function ($hit) {
-            $src = $hit['source'];
-            unset($src['motivation_embedding']);
-            return $src;
-        }, $searchResult['results']);
-    }
+        $objectKeys = ['match_all', 'match_none', 'params', 'settings', 'mappings'];
 
-    /**
-     * Heuristic: is this query too generic to be useful for keyword search?
-     * Generic descriptions (no proper nouns, no specific terms) tend to produce
-     * false negatives when AND'd with filters in a multi_match query.
-     */
-    private function isGenericQuery(string $query): bool
-    {
-        $genericWords = ['contributions', 'contribution', 'research', 'work', 'studies',
-                         'discoveries', 'discovery', 'achievements', 'laureates', 'winners',
-                         'scientists', 'researchers', 'physicists', 'chemists', 'biologists'];
-
-        $words = preg_split('/\s+/', strtolower(trim($query)));
-        if (empty($words)) {
-            return true;
-        }
-
-        $genericCount = count(array_intersect($words, $genericWords));
-        // Consider generic if more than half the words are generic descriptors
-        return $genericCount / count($words) > 0.5;
-    }
-
-    // ── Phase 2b ──────────────────────────────────────────────────────────────
-
-    /**
-     * Merge multiple ranked result lists using Reciprocal Rank Fusion (RRF).
-     *
-     * RRF score = Σ 1 / (k + rank_i) across all lists containing the document.
-     * Documents appearing high in multiple lists get the highest scores.
-     * Documents in only one list are still included, ranked by their position.
-     *
-     * @param array[] $resultLists Named arrays of source documents (ordered by relevance)
-     * @return array[] Deduplicated documents ordered by RRF score (descending)
-     */
-    private function fuseWithRRF(array $resultLists): array
-    {
-        $scores = [];  // docId → RRF score
-        $docs   = [];  // docId → source document
-
-        foreach ($resultLists as $list) {
-            foreach ($list as $rank => $doc) {
-                $id = $doc['id'] ?? '';
-                if ($id === '') {
-                    continue;
-                }
-
-                $scores[$id] = ($scores[$id] ?? 0.0) + 1.0 / (self::RRF_K + $rank + 1);
-                $docs[$id]   = $doc;
+        foreach ($data as $key => &$value) {
+            if (in_array($key, $objectKeys, true) && is_array($value) && empty($value)) {
+                $value = new \stdClass();
+            } elseif (is_array($value)) {
+                $value = $this->normalizeQuery($value);
             }
         }
 
-        arsort($scores);
-
-        return array_values(array_map(fn($id) => $docs[$id], array_keys($scores)));
+        return $data;
     }
 
-    // ── Phase 3 ───────────────────────────────────────────────────────────────
-
     /**
-     * Generate a grounded answer from the fused context documents.
-     *
-     * Enumerate queries (filter-only, expecting a complete list) build the
-     * list directly in PHP — the LLM only writes a brief intro sentence.
-     * This guarantees the list is never truncated regardless of token limits.
-     *
-     * Synthesize queries (conceptual) use the LLM for the full response.
+     * Synthesize a natural language answer from the ES results.
      */
-    private function generateAnswer(string $question, array $context, bool $isEnumerateQuery = false): string
+    private function synthesize(string $question, array $result, array $esQuery = []): string
     {
-        if (empty($context)) {
-            return 'No relevant documents were found in the database for this question.';
-        }
+        $prompt = str_replace('{current_date}', date('Y-m-d'), self::SYNTHESIS_PROMPT);
 
-        if ($isEnumerateQuery) {
-            return $this->generateEnumerateAnswer($question, $context);
-        }
+        // Format results concisely for the LLM
+        $resultContext = $this->formatResultsForLLM($result);
 
-        $contextBlock = $this->formatContext($context);
+        // Include the query so the LLM knows what filters were applied
+        $queryContext = '';
+        if (!empty($esQuery)) {
+            $queryContext = "Query executed:\n" . json_encode($this->redactVector($esQuery), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n\n";
+        }
 
         $messages = [
-            ['role' => 'system', 'content' => self::GENERATION_PROMPT],
+            ['role' => 'system', 'content' => $prompt],
             [
                 'role'    => 'user',
-                'content' => "Context documents:\n\n{$contextBlock}\n\nQuestion: {$question}",
+                'content' => "{$queryContext}Elasticsearch results:\n\n{$resultContext}\n\nQuestion: {$question}",
             ],
         ];
 
@@ -626,81 +394,92 @@ PROMPT;
     }
 
     /**
-     * For enumerate queries, build the complete list in PHP and ask the LLM
-     * only for a short introductory sentence.
-     *
-     * The list is constructed here, not by the LLM, so it is always complete.
+     * Format ES results into a compact text representation for the LLM.
      */
-    private function generateEnumerateAnswer(string $question, array $context): string
+    private function formatResultsForLLM(array $result): string
     {
-        $count = count($context);
+        $parts = [];
 
-        // Ask the LLM for a one-sentence intro only — cheap and reliable
-        $messages = [
-            [
-                'role'    => 'system',
-                'content' => 'You are a research assistant for Nobel Prize data. ' .
-                             'Write exactly one concise introductory sentence for the list of results that follows. ' .
-                             'Do not list the results yourself.',
-            ],
-            [
-                'role'    => 'user',
-                'content' => "Question: {$question}\nFound {$count} matching laureates in the database.",
-            ],
-        ];
+        // Total hits — this count reflects the query filters applied
+        $total = $result['hits']['total']['value'] ?? 0;
+        $parts[] = "Total matching documents: {$total} (this is the count of documents matching all query filters)";
 
-        $intro = trim($this->chatProvider->complete($messages, ['max_completion_tokens' => 80]));
-
-        // Build the complete list in PHP — no token limit applies here
-        $lines = [];
-        foreach ($context as $i => $doc) {
-            $fullname   = $doc['fullname'] ?? trim(($doc['firstname'] ?? '') . ' ' . ($doc['surname'] ?? ''));
-            $category   = $doc['category'] ?? '';
-            $year       = $doc['year'] ?? '';
-            $motivation = $doc['motivation'] ?? '';
-
-            $entry = ($i + 1) . '. **' . $fullname . '** — ' . $category . ' ' . $year;
-            if ($motivation) {
-                // Trim motivation to ~120 chars for readability
-                $short = mb_strlen($motivation) > 120
-                    ? mb_substr($motivation, 0, 117) . '...'
-                    : $motivation;
-                $entry .= ': ' . $short;
-            }
-            $lines[] = $entry;
+        // Aggregations
+        if (!empty($result['aggregations'])) {
+            $parts[] = "\n## Aggregations\n" . $this->formatAggregations($result['aggregations']);
         }
 
-        return $intro . "\n\n" . implode("\n", $lines);
+        // Hits
+        $hits = $result['hits']['hits'] ?? [];
+        if (!empty($hits)) {
+            $lines = ["\n## Documents (showing " . count($hits) . " of {$total})"];
+            foreach ($hits as $i => $hit) {
+                $src = $hit['_source'] ?? [];
+                unset($src['motivation_embedding']);
+                $n = $i + 1;
+                $lines[] = "[{$n}] " . json_encode($src, JSON_UNESCAPED_UNICODE);
+            }
+            $parts[] = implode("\n", $lines);
+        }
+
+        return implode("\n", $parts);
     }
 
     /**
-     * Format context documents for inclusion in the generation prompt.
+     * Recursively format aggregation results.
      */
-    private function formatContext(array $docs): string
+    private function formatAggregations(array $aggs, int $depth = 0): string
     {
         $lines = [];
+        $indent = str_repeat('  ', $depth);
 
-        foreach ($docs as $i => $doc) {
-            $n        = $i + 1;
-            $fullname = $doc['fullname'] ?? trim(($doc['firstname'] ?? '') . ' ' . ($doc['surname'] ?? ''));
-            $category = ucfirst($doc['category'] ?? '');
-            $year     = $doc['year'] ?? '';
-            $motivation = $doc['motivation'] ?? 'No motivation recorded.';
+        foreach ($aggs as $name => $agg) {
+            if (isset($agg['buckets'])) {
+                // Filter out empty-string buckets (unnamed organizations, etc.)
+                $validBuckets = array_filter($agg['buckets'], function ($bucket) {
+                    $key = $bucket['key_as_string'] ?? $bucket['key'] ?? '';
+                    return $key !== '';
+                });
 
-            $line = "[{$n}] {$fullname} — {$category} Prize {$year}\n";
-            $line .= "    Motivation: {$motivation}";
-
-            $affiliations = $doc['affiliations'] ?? [];
-            if (!empty($affiliations)) {
-                $names = array_filter(array_map(fn($a) => $a['name'] ?? '', $affiliations));
-                if (!empty($names)) {
-                    $line .= "\n    Affiliation: " . implode(', ', $names);
+                if (empty($validBuckets)) {
+                    $lines[] = "{$indent}{$name}: (no results)";
+                    continue;
                 }
-            }
 
-            $lines[] = $line;
+                $lines[] = "{$indent}{$name}:";
+                foreach ($validBuckets as $bucket) {
+                    $key = $bucket['key_as_string'] ?? $bucket['key'] ?? '?';
+                    $count = $bucket['doc_count'] ?? 0;
+                    $line = "{$indent}  - {$key}: {$count}";
+
+                    $subAggs = array_filter($bucket, fn($v, $k) => is_array($v) && !in_array($k, ['key', 'key_as_string', 'doc_count', 'from', 'to']), ARRAY_FILTER_USE_BOTH);
+                    if (!empty($subAggs)) {
+                        $line .= "\n" . $this->formatAggregations($subAggs, $depth + 2);
+                    }
+
+                    $lines[] = $line;
+                }
+            } elseif (isset($agg['value'])) {
+                $lines[] = "{$indent}{$name}: {$agg['value']}";
+            } elseif (isset($agg['count'])) {
+                $lines[] = "{$indent}{$name}: count={$agg['count']} min={$agg['min']} max={$agg['max']} avg=" . round($agg['avg'] ?? 0, 1);
+            }
         }
 
-        return implode("\n\n", $lines);
+        return implode("\n", $lines);
+    }
+
+    /**
+     * Extract source documents from hits for display purposes.
+     */
+    private function extractSources(array $result): array
+    {
+        $sources = [];
+        foreach ($result['hits']['hits'] ?? [] as $hit) {
+            $src = $hit['_source'] ?? [];
+            unset($src['motivation_embedding']);
+            $sources[] = $src;
+        }
+        return $sources;
     }
 }

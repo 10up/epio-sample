@@ -62,7 +62,7 @@ $ragService       = null;
 
 if ($hasEmbeddings) {
     $embeddingService = ServiceFactory::embeddingService($config);
-    $ragService       = ServiceFactory::ragService($config);
+    $ragService       = ServiceFactory::ragService($config, $indexName);
 }
 
 // ── JSON Schema definitions ───────────────────────────────────────────────────
@@ -203,7 +203,7 @@ $registry->register(
             throw new \InvalidArgumentException('question is required');
         }
 
-        $result = $ragService->ask($indexName, $question);
+        $result = $ragService->ask($question);
 
         return [
             'question' => $result['question'],

@@ -141,7 +141,7 @@ try {
     echo "   Time:      {$elapsed}s\n\n";
 
     // Cost estimate for OpenAI (approximate, based on ~80 tokens per document)
-    if ($result['updated'] > 0 && str_contains($apiBaseUrl, 'openai.com')) {
+    if ($result['updated'] > 0 && str_contains($config->getOpenAIApiBaseUrl(), 'openai.com')) {
         $estimatedTokens = $result['updated'] * 80;
         // text-embedding-3-small: $0.02/1M tokens
         $estimatedCost = round($estimatedTokens / 1_000_000 * 0.02, 6);
