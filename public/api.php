@@ -81,14 +81,12 @@ try {
 
         $result = $ragService->ask($question);
 
-        // Deduplicate sources by document id
         $seen    = [];
         $sources = [];
         foreach ($result['sources'] as $s) {
             $id = $s['id'] ?? ($s['fullname'] ?? '');
-            if (!isset($seen[$id])) {
+            if ($id && !isset($seen[$id])) {
                 $seen[$id]  = true;
-                unset($s['motivation_embedding']);
                 $sources[] = $s;
             }
         }

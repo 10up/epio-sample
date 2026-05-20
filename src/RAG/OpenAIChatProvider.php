@@ -16,6 +16,8 @@ use ElasticPressIO\Sample\Shared\HttpClientFactory;
  */
 class OpenAIChatProvider implements ChatProviderInterface
 {
+    private const MAX_RETRIES = 3;
+
     private \GuzzleHttp\Client $client;
 
     public function __construct(
@@ -38,7 +40,7 @@ class OpenAIChatProvider implements ChatProviderInterface
     }
 
     /**
-     * Core HTTP call — handles both plain completions and tool-use turns.
+     * Core HTTP call with retry on rate-limit (429) and server errors (5xx).
      *
      * @return array{content: string|null, tool_calls: array|null, finish_reason: string}
      */
@@ -51,10 +53,6 @@ class OpenAIChatProvider implements ChatProviderInterface
             'max_completion_tokens' => 16000,
         ], $options);
 
-        // Normalise legacy max_tokens → max_completion_tokens.
-        // Older models accepted max_tokens; newer models (gpt-4.1, o1, o3…)
-        // require max_completion_tokens. We accept both from callers but always
-        // send max_completion_tokens so both old and new models are happy.
         if (isset($body['max_tokens']) && !isset($body['max_completion_tokens'])) {
             $body['max_completion_tokens'] = $body['max_tokens'];
         }
@@ -64,22 +62,36 @@ class OpenAIChatProvider implements ChatProviderInterface
             $body['tools'] = $tools;
         }
 
-        $response   = $this->client->post('chat/completions', ['json' => $body]);
-        $statusCode = $response->getStatusCode();
-        $data       = json_decode($response->getBody()->getContents(), true);
+        $delaySeconds = 1;
 
-        if ($statusCode >= 400) {
-            $error = $data['error']['message'] ?? "HTTP {$statusCode}";
-            throw new \RuntimeException("Chat API error: {$error}");
+        for ($attempt = 0; $attempt <= self::MAX_RETRIES; $attempt++) {
+            $response   = $this->client->post('chat/completions', ['json' => $body]);
+            $statusCode = $response->getStatusCode();
+            $data       = json_decode($response->getBody()->getContents(), true);
+
+            if ($statusCode === 429 || ($statusCode >= 500 && $attempt < self::MAX_RETRIES)) {
+                $retryAfter = $response->getHeaderLine('Retry-After');
+                $wait = $retryAfter ? (int) $retryAfter : $delaySeconds;
+                sleep($wait);
+                $delaySeconds *= 2;
+                continue;
+            }
+
+            if ($statusCode >= 400) {
+                $error = $data['error']['message'] ?? "HTTP {$statusCode}";
+                throw new \RuntimeException("Chat API error: {$error}");
+            }
+
+            $message      = $data['choices'][0]['message'] ?? [];
+            $finishReason = $data['choices'][0]['finish_reason'] ?? 'stop';
+
+            return [
+                'content'      => $message['content'] ?? null,
+                'tool_calls'   => $message['tool_calls'] ?? null,
+                'finish_reason' => $finishReason,
+            ];
         }
 
-        $message      = $data['choices'][0]['message'] ?? [];
-        $finishReason = $data['choices'][0]['finish_reason'] ?? 'stop';
-
-        return [
-            'content'      => $message['content'] ?? null,
-            'tool_calls'   => $message['tool_calls'] ?? null,
-            'finish_reason' => $finishReason,
-        ];
+        throw new \RuntimeException("Chat API failed after " . self::MAX_RETRIES . " retries (rate limited).");
     }
 }

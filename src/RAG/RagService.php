@@ -105,6 +105,8 @@ Rules:
 - If an aggregation returns zero buckets after filtering (e.g. bucket_selector), that means no results matched the criteria — state this clearly as "none found" rather than "insufficient data".
 PROMPT;
 
+    private ?string $cachedSchema = null;
+
     public function __construct(
         private readonly EmbeddingService $embeddingService,
         private readonly ElasticsearchClient $esClient,
@@ -117,7 +119,7 @@ PROMPT;
      */
     public function ask(string $question, ?callable $debugCallback = null): array
     {
-        // ── Step 1: Get index schema ──────────────────────────────────────────
+        // ── Step 1: Get index schema (cached after first call) ────────────────
 
         $schema = $this->getSchema();
 
@@ -164,14 +166,20 @@ PROMPT;
 
     /**
      * Get a simplified schema description from the index mapping.
+     * Result is cached for the lifetime of this instance.
      */
     private function getSchema(): string
     {
-        $mapping = $this->esClient->get("/{$this->indexName}/_mapping");
+        if ($this->cachedSchema !== null) {
+            return $this->cachedSchema;
+        }
 
+        $mapping = $this->esClient->get("/{$this->indexName}/_mapping");
         $properties = $mapping[$this->indexName]['mappings']['properties'] ?? [];
 
-        return $this->flattenMapping($properties);
+        $this->cachedSchema = $this->flattenMapping($properties);
+
+        return $this->cachedSchema;
     }
 
     /**

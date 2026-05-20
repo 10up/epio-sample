@@ -208,6 +208,7 @@ $registry->register(
         return [
             'question' => $result['question'],
             'answer'   => $result['answer'],
+            'es_query' => $result['es_query'] ?? null,
             'sources'  => array_map(function ($s) {
                 return [
                     'fullname'   => $s['fullname'] ?? '',

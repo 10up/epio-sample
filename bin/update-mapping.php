@@ -42,10 +42,11 @@ try {
 
     echo "2. Applying embedding mapping patch...\n";
 
-    $patch = NobelPrizeMapping::getEmbeddingMappingPatch();
+    $dims = $config->getOpenAIEmbeddingDimensions();
+    $patch = NobelPrizeMapping::getEmbeddingMappingPatch($dims);
     $indexManager->updateMappings($indexName, $patch);
 
-    echo "   ✓ Added 'motivation_embedding' (dense_vector, 1536 dims, cosine similarity).\n\n";
+    echo "   ✓ Added 'motivation_embedding' (dense_vector, {$dims} dims, cosine similarity).\n\n";
 
     echo "=== Mapping Update Complete ===\n\n";
     echo "Next step: run php bin/generate-embeddings.php to populate embeddings.\n";

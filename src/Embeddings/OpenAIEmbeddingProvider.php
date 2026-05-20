@@ -82,10 +82,15 @@ class OpenAIEmbeddingProvider implements EmbeddingProviderInterface
 
         for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
             $body = [
-                'model'      => $this->model,
-                'input'      => $inputs,
-                'dimensions' => $this->dimensions,
+                'model' => $this->model,
+                'input' => $inputs,
             ];
+
+            // Only text-embedding-3-* models support the dimensions parameter.
+            // Sending it to older models (ada-002) or some local providers causes errors.
+            if (str_starts_with($this->model, 'text-embedding-3')) {
+                $body['dimensions'] = $this->dimensions;
+            }
 
             $response = $this->client->post('embeddings', [
                 'json' => $body,

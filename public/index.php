@@ -1134,10 +1134,11 @@ try {
                         const seen = new Set();
                         const unique = sources.filter(s => {
                             const id = s.id || s.fullname;
-                            if (seen.has(id)) return false;
+                            if (!id || seen.has(id)) return false;
                             seen.add(id); return true;
                         });
 
+                        document.getElementById('sidebarTitle').textContent = `Sources (${unique.length})`;
                         document.getElementById('facetsContent').innerHTML = unique.map((s, i) => {
                             const name = escapeHtml(s.fullname || 'Unknown');
                             const cat  = escapeHtml(s.category || '');
@@ -1152,8 +1153,9 @@ try {
                             </div>`;
                         }).join('');
                     } else {
+                        document.getElementById('sidebarTitle').textContent = 'Sources';
                         document.getElementById('facetsContent').innerHTML =
-                            '<p style="color:#999;font-size:13px">No sources retrieved.</p>';
+                            '<p style="color:#999;font-size:13px">This query used aggregations — no individual documents were retrieved.</p>';
                     }
                 } else {
                     document.getElementById('resultsContent').innerHTML =

@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace ElasticPressIO\Sample\Mapping;
 
-use ElasticPressIO\Sample\Config\Config;
-
 /**
  * Defines the Elasticsearch mapping for Nobel Prize data.
  *
@@ -23,17 +21,15 @@ use ElasticPressIO\Sample\Config\Config;
  */
 class NobelPrizeMapping
 {
+    private const DEFAULT_EMBEDDING_DIMS = 1536;
+
     /**
      * Get the complete mapping configuration for the Nobel Prize index.
      *
-     * This mapping is designed to support:
-     * - Full-text search on names, motivations, and affiliations
-     * - Faceting by category, year range, gender, prize country, and birth country
-     * - Sorting by year, share, and birth date
-     *
+     * @param int $embeddingDims Vector dimensions for the motivation_embedding field
      * @return array Elasticsearch mapping configuration
      */
-    public static function getMapping(): array
+    public static function getMapping(int $embeddingDims = self::DEFAULT_EMBEDDING_DIMS): array
     {
         return [
             'properties' => [
@@ -194,7 +190,7 @@ class NobelPrizeMapping
 
                 'motivation_embedding' => [
                     'type'       => 'dense_vector',
-                    'dims'       => Config::getInstance()->getOpenAIEmbeddingDimensions(),
+                    'dims'       => $embeddingDims,
                     'index'      => true,
                     'similarity' => 'cosine',
                 ],
@@ -235,13 +231,13 @@ class NobelPrizeMapping
      *
      * @return array Partial mapping to be PUT to /{index}/_mapping
      */
-    public static function getEmbeddingMappingPatch(): array
+    public static function getEmbeddingMappingPatch(int $embeddingDims = self::DEFAULT_EMBEDDING_DIMS): array
     {
         return [
             'properties' => [
                 'motivation_embedding' => [
                     'type'       => 'dense_vector',
-                    'dims'       => Config::getInstance()->getOpenAIEmbeddingDimensions(),
+                    'dims'       => $embeddingDims,
                     'index'      => true,
                     'similarity' => 'cosine',
                 ],
@@ -252,13 +248,14 @@ class NobelPrizeMapping
     /**
      * Get the complete index configuration (settings + mappings).
      *
+     * @param int $embeddingDims Vector dimensions for the motivation_embedding field
      * @return array Complete index configuration
      */
-    public static function getIndexConfiguration(): array
+    public static function getIndexConfiguration(int $embeddingDims = self::DEFAULT_EMBEDDING_DIMS): array
     {
         return [
             'settings' => self::getSettings(),
-            'mappings' => self::getMapping(),
+            'mappings' => self::getMapping($embeddingDims),
         ];
     }
 }

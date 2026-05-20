@@ -14,8 +14,7 @@ A comprehensive example demonstrating how to use [ElasticPress.io](https://elast
 
 **AI / RAG**
 - Ask AI: natural language questions answered from the database with source citations
-- Three-phase RAG pipeline: query understanding → multi-strategy retrieval + RRF → grounded generation
-- Aggregation queries: "which person won the most prizes?", "which country produced the most laureates?"
+- Text-to-Elasticsearch-DSL: LLM reads index schema, composes optimal queries (aggregations, kNN, sorts), executes, synthesizes answers
 - Compatible with any OpenAI-compatible API (OpenAI, Ollama, LM Studio, Groq, Azure)
 
 **MCP Server**
@@ -81,6 +80,7 @@ ELASTICPRESS_SUBSCRIPTION_TOKEN=your-subscription-token
 OPENAI_API_BASE_URL=https://api.openai.com/v1
 OPENAI_API_KEY=sk-your-api-key
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_EMBEDDING_DIMS=1536
 OPENAI_CHAT_MODEL=gpt-4o-mini
 ```
 
@@ -164,11 +164,11 @@ Results include relevance score. Filters (category, gender, year) apply to all m
 
 ### Ask AI tab
 
-Ask natural language questions. The system:
-1. Extracts structured search parameters (category, gender, year, country) from the question
-2. Runs keyword, semantic, and filter-based retrieval in parallel
-3. Fuses results with Reciprocal Rank Fusion
-4. Generates a grounded answer with source citations
+Ask natural language questions. The system uses a text-to-Elasticsearch-DSL approach that adapts to any index schema without code changes:
+1. Reads the index mapping to discover available fields and their types
+2. The LLM writes the optimal ES query DSL (aggregations, filters, kNN, sorts)
+3. Executes the query against Elasticsearch with auto-retry on errors
+4. The LLM synthesizes a grounded answer from the raw hits and aggregations
 
 Example questions:
 - *Which women won the physics prize?*
