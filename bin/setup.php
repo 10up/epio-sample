@@ -58,7 +58,7 @@ try {
 
     // Create index with mappings
     $settings = NobelPrizeMapping::getSettings();
-    $mappings = NobelPrizeMapping::getMapping();
+    $mappings = NobelPrizeMapping::getMapping($config->getOpenAIEmbeddingDimensions());
 
     $response = $indexManager->createIndex($indexName, $settings, $mappings);
     echo "   ✓ Index created successfully\n";

@@ -8,13 +8,10 @@ try {
     $config = Config::getInstance();
     $config->validate();
 
-    $indexName = $config->getIndexPrefix() . 'laureates';
+    $indexName    = $config->getIndexPrefix() . 'laureates';
     $templateManager = new SearchTemplateManager();
-    $apiUrl = $templateManager->getPublicSearchUrl($indexName);
     $searchApiUrl = $templateManager->getPublicSearchUrl($indexName);
 } catch (\Exception $e) {
-    // Fallback if config fails
-    $apiUrl = '';
     $searchApiUrl = '';
     error_log('Failed to load ElasticPress.io config: ' . $e->getMessage());
 }
@@ -343,6 +340,159 @@ try {
             }
         }
 
+        /* ── Tabs ────────────────────────────────────────────────── */
+
+        .tab-bar {
+            display: flex;
+            border-bottom: 2px solid #eee;
+            margin-bottom: 24px;
+            gap: 0;
+        }
+
+        .tab {
+            padding: 10px 24px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+            font-size: 15px;
+            font-weight: 500;
+            color: #888;
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s;
+        }
+
+        .tab:hover { color: #2c3e50; }
+
+        .tab.active {
+            color: #2c3e50;
+            border-bottom-color: #3498db;
+        }
+
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* ── Search mode toggle ──────────────────────────────────── */
+
+        .mode-toggle {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 16px;
+            align-items: center;
+        }
+
+        .mode-toggle label {
+            font-size: 13px;
+            font-weight: 500;
+            color: #555;
+            margin-right: 4px;
+        }
+
+        .mode-btn {
+            padding: 6px 16px;
+            border: 2px solid #ddd;
+            border-radius: 20px;
+            background: white;
+            color: #666;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .mode-btn:hover { border-color: #3498db; color: #3498db; }
+
+        .mode-btn.active              { border-color: #3498db; background: #3498db; color: white; }
+        .mode-btn.active.semantic     { border-color: #8e44ad; background: #8e44ad; }
+        .mode-btn.active.hybrid       { border-color: #27ae60; background: #27ae60; }
+
+        /* Mode badge on results */
+        .mode-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+
+        .mode-badge.semantic { background: #f3e5f5; color: #6a1b9a; }
+        .mode-badge.hybrid   { background: #e8f5e9; color: #1b5e20; }
+
+        /* ── Ask AI tab ──────────────────────────────────────────── */
+
+        .ask-input-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .ask-input-row input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            font-size: 15px;
+        }
+
+        .ask-input-row input:focus { outline: none; border-color: #8e44ad; }
+
+        .ask-btn {
+            padding: 12px 28px;
+            background: #8e44ad;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .ask-btn:hover { background: #7d3c98; }
+        .ask-btn:disabled { background: #bbb; cursor: not-allowed; }
+
+        .ask-loading {
+            color: #8e44ad;
+            font-size: 13px;
+            font-style: italic;
+            margin-top: 10px;
+        }
+
+        /* ── Ask AI answer (rendered in results panel) ───────────── */
+
+        .ask-answer-header {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 16px;
+            font-style: italic;
+        }
+
+        .ask-answer-header strong { color: #555; font-style: normal; }
+
+        /* Markdown-rendered answer */
+        .markdown-content { line-height: 1.75; color: #333; }
+        .markdown-content h2 { font-size: 1.2rem; margin: 18px 0 8px; color: #2c3e50; }
+        .markdown-content h3 { font-size: 1.05rem; margin: 14px 0 6px; color: #2c3e50; }
+        .markdown-content p  { margin: 0 0 12px; }
+        .markdown-content ul, .markdown-content ol { margin: 0 0 12px 20px; }
+        .markdown-content li { margin-bottom: 6px; }
+        .markdown-content strong { color: #2c3e50; }
+
+        /* ── Ask AI sources (shown in left sidebar) ──────────────── */
+
+        .source-card {
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+            font-size: 13px;
+        }
+
+        .source-card:last-child { border-bottom: none; }
+
+        .source-card-name { font-weight: 600; color: #2c3e50; margin-bottom: 2px; }
+        .source-card-meta { color: #888; font-size: 12px; margin-bottom: 4px; }
+        .source-card-motivation { color: #555; font-style: italic; font-size: 12px; }
+
         /* Modal styles */
         .modal {
             display: none;
@@ -419,7 +569,45 @@ try {
         .modal-affiliations li:last-child {
             border-bottom: none;
         }
+        /* ── Markdown content tables ────────────────────────────── */
+
+        .markdown-content table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 12px 0;
+            font-size: 13px;
+        }
+
+        .markdown-content th,
+        .markdown-content td {
+            border: 1px solid #ddd;
+            padding: 8px 10px;
+            text-align: left;
+        }
+
+        .markdown-content th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
+
+        .markdown-content tr:nth-child(even) { background: #fafafa; }
+
+        .markdown-content ol,
+        .markdown-content ul {
+            margin: 8px 0;
+            padding-left: 24px;
+        }
+
+        .markdown-content li { margin: 4px 0; }
+
+        .markdown-content h2,
+        .markdown-content h3 {
+            margin: 16px 0 8px;
+        }
+
+        .markdown-content p { margin: 8px 0; }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
 </head>
 <body>
     <header>
@@ -430,42 +618,70 @@ try {
     </header>
 
     <div class="container">
+
+        <!-- Tab card: Search + Ask AI -->
         <div class="search-container">
-            <div class="search-box">
-                <div class="search-input-wrapper">
-                    <input type="text" id="searchInput" placeholder="Search by name, motivation, or affiliation..." autocomplete="off" />
-                    <div id="autosuggestDropdown" class="autosuggest-dropdown"></div>
-                </div>
-                <button onclick="performSearch()">Search</button>
+
+            <div class="tab-bar">
+                <button class="tab active" id="tab-search" onclick="switchTab('search')">Search</button>
+                <button class="tab" id="tab-ask" onclick="switchTab('ask')">Ask AI</button>
             </div>
 
-            <div class="filters">
-                <div class="filter-group">
-                    <label>Category</label>
-                    <select id="categoryFilter" onchange="performSearch()">
-                        <option value="">All Categories</option>
-                    </select>
+            <!-- Search tab panel -->
+            <div class="tab-panel active" id="panel-search">
+                <div class="mode-toggle">
+                    <label>Mode:</label>
+                    <button class="mode-btn active" id="mode-keyword" onclick="setSearchMode('keyword')">Keyword</button>
+                    <button class="mode-btn semantic" id="mode-semantic" onclick="setSearchMode('semantic')">Semantic</button>
+                    <button class="mode-btn hybrid" id="mode-hybrid" onclick="setSearchMode('hybrid')">Hybrid</button>
                 </div>
-                <div class="filter-group">
-                    <label>Gender</label>
-                    <select id="genderFilter" onchange="performSearch()">
-                        <option value="">All Genders</option>
-                    </select>
+
+                <div class="search-box">
+                    <div class="search-input-wrapper">
+                        <input type="text" id="searchInput" placeholder="Search by name, motivation, or affiliation..." autocomplete="off" />
+                        <div id="autosuggestDropdown" class="autosuggest-dropdown"></div>
+                    </div>
+                    <button onclick="performSearch()">Search</button>
                 </div>
-                <div class="filter-group">
-                    <label>Year From</label>
-                    <input type="number" id="yearFromFilter" placeholder="e.g., 2000" onchange="performSearch()" />
-                </div>
-                <div class="filter-group">
-                    <label>Year To</label>
-                    <input type="number" id="yearToFilter" placeholder="e.g., 2023" onchange="performSearch()" />
+
+                <div class="filters">
+                    <div class="filter-group">
+                        <label>Category</label>
+                        <select id="categoryFilter" onchange="performSearch()">
+                            <option value="">All Categories</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Gender</label>
+                        <select id="genderFilter" onchange="performSearch()">
+                            <option value="">All Genders</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Year From</label>
+                        <input type="number" id="yearFromFilter" placeholder="e.g., 2000" onchange="performSearch()" />
+                    </div>
+                    <div class="filter-group">
+                        <label>Year To</label>
+                        <input type="number" id="yearToFilter" placeholder="e.g., 2023" onchange="performSearch()" />
+                    </div>
                 </div>
             </div>
-        </div>
+
+            <!-- Ask AI tab panel -->
+            <div class="tab-panel" id="panel-ask">
+                <div class="ask-input-row">
+                    <input type="text" id="askInput" placeholder="Ask anything about Nobel Prize history..." autocomplete="off" />
+                    <button class="ask-btn" id="askBtn" onclick="performAsk()">Ask</button>
+                </div>
+                <div class="ask-loading" id="askLoading" style="display:none">Searching the knowledge base and generating answer...</div>
+            </div>
+
+        </div><!-- /.search-container -->
 
         <div class="content">
             <div class="facets" id="facets">
-                <h3>Filters</h3>
+                <h3 id="sidebarTitle">Filters</h3>
                 <div id="facetsContent"></div>
             </div>
 
@@ -489,9 +705,7 @@ try {
     </div>
 
     <script>
-        // Configuration - Automatically set from .env configuration
-        // This is the PUBLIC API endpoint that requires NO authentication
-        const ELASTICPRESS_API_URL = <?php echo json_encode($apiUrl); ?>;
+        // Public ElasticPress.io search API — no authentication required
         const ELASTICPRESS_SEARCH_API_URL = <?php echo json_encode($searchApiUrl); ?>;
 
         // Generate UUID v4 for request IDs (based on ElasticPress implementation)
@@ -587,26 +801,14 @@ try {
                 // Generate request ID for tracking
                 const requestId = generateRequestId();
 
-                // Use the template from backend and replace placeholder with actual query
-                // Convert template to string, replace placeholder, then parse back to JSON
-                const templateStr = JSON.stringify(autosuggestTemplate);
-                const replacedStr = templateStr.replace(/\{\{ep_placeholder\}\}/g, query);
-                const searchBody = JSON.parse(replacedStr);
-
-                console.log('Search query:', query);
-                console.log('Request body:', searchBody);
-
-                const response = await fetch(`${ELASTICPRESS_SEARCH_API_URL}?search=${query}`, {
+                const response = await fetch(`${ELASTICPRESS_SEARCH_API_URL}?search=${encodeURIComponent(query)}`, {
                     method: 'GET',
                     headers: {
                         'X-ElasticPress-Request-ID': requestId
                     }
                 });
 
-                console.log('Response status:', response.status);
                 const data = await response.json();
-                console.log('Response data:', data);
-                console.log('Search Request ID:', requestId);
 
                 displayAutosuggest(data, query);
             } catch (error) {
@@ -771,6 +973,57 @@ try {
             autosuggestDropdown.innerHTML = '';
         }
 
+        // ── Tab switching ─────────────────────────────────────────────────────
+
+        let currentTab = 'search';
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.getElementById('tab-search').classList.toggle('active', tab === 'search');
+            document.getElementById('tab-ask').classList.toggle('active', tab === 'ask');
+            document.getElementById('panel-search').classList.toggle('active', tab === 'search');
+            document.getElementById('panel-ask').classList.toggle('active', tab === 'ask');
+
+            if (tab === 'search') {
+                document.getElementById('sidebarTitle').textContent = 'Filters';
+                // Restore search state
+                performSearch();
+            } else {
+                // Clear results area ready for an answer
+                document.getElementById('sidebarTitle').textContent = 'Sources';
+                document.getElementById('facetsContent').innerHTML =
+                    '<p style="color:#999;font-size:13px">Sources used by the AI will appear here after you ask a question.</p>';
+                document.getElementById('resultsCount').textContent = 'Ask AI';
+                document.getElementById('resultsContent').innerHTML =
+                    '<div class="loading">Ask a question above to get a grounded answer from the Nobel Prize database.</div>';
+                // Focus the ask input
+                setTimeout(() => document.getElementById('askInput').focus(), 50);
+            }
+        }
+
+        function renderMarkdown(text) {
+            if (!text) return '';
+            return marked.parse(text);
+        }
+
+        // ── Search mode toggle ──────────────────────────────────────────────────
+
+        let currentSearchMode = 'keyword';
+
+        function setSearchMode(mode) {
+            currentSearchMode = mode;
+
+            // Update button states
+            ['keyword', 'semantic', 'hybrid'].forEach(m => {
+                const btn = document.getElementById(`mode-${m}`);
+                if (btn) {
+                    btn.classList.toggle('active', m === mode);
+                }
+            });
+
+            performSearch();
+        }
+
         async function performSearch() {
             const query = document.getElementById('searchInput').value;
             const category = document.getElementById('categoryFilter').value;
@@ -785,6 +1038,7 @@ try {
             if (gender) params.append('gender', gender);
             if (yearFrom) params.append('year_from', yearFrom);
             if (yearTo) params.append('year_to', yearTo);
+            params.append('mode', currentSearchMode);
 
             // Show loading
             document.getElementById('resultsContent').innerHTML = '<div class="loading">Searching...</div>';
@@ -798,11 +1052,11 @@ try {
                     displayFacets(data.facets);
                 } else {
                     document.getElementById('resultsContent').innerHTML =
-                        `<div class="error">Error: ${data.error}</div>`;
+                        `<div class="error">Error: ${escapeHtml(data.error)}</div>`;
                 }
             } catch (error) {
                 document.getElementById('resultsContent').innerHTML =
-                    `<div class="error">Error: ${error.message}</div>`;
+                    `<div class="error">Error: ${escapeHtml(error.message)}</div>`;
             }
         }
 
@@ -810,7 +1064,12 @@ try {
             const resultsCount = document.getElementById('resultsCount');
             const resultsContent = document.getElementById('resultsContent');
 
-            resultsCount.textContent = `Found ${data.total} results`;
+            const mode = data.mode || 'keyword';
+            const modeBadge = (mode !== 'keyword')
+                ? `<span class="mode-badge ${escapeHtml(mode)}">${escapeHtml(mode)}</span>`
+                : '';
+
+            resultsCount.innerHTML = `Found ${data.total} results ${modeBadge}`;
 
             if (data.results.length === 0) {
                 resultsContent.innerHTML = '<div class="loading">No results found</div>';
@@ -829,6 +1088,85 @@ try {
                     ${result.motivation ? `<div class="result-motivation">"${escapeHtml(result.motivation)}"</div>` : ''}
                 </div>
             `).join('');
+        }
+
+        // ── Ask AI (RAG) ──────────────────────────────────────────────────────
+
+        // Allow Enter key in Ask input
+        document.getElementById('askInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') performAsk();
+        });
+
+        async function performAsk() {
+            const question = document.getElementById('askInput').value.trim();
+            if (!question) return;
+
+            const btn     = document.getElementById('askBtn');
+            const loading = document.getElementById('askLoading');
+
+            btn.disabled = true;
+            loading.style.display = 'block';
+            document.getElementById('resultsCount').textContent = 'Ask AI';
+            document.getElementById('resultsContent').innerHTML = '<div class="loading">Thinking...</div>';
+            document.getElementById('facetsContent').innerHTML  = '<p style="color:#999;font-size:13px">Searching...</p>';
+
+            try {
+                const params = new URLSearchParams({ ask: question });
+                const response = await fetch(`api.php?${params.toString()}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    // ── Answer in main panel ──────────────────────────────
+                    document.getElementById('resultsCount').textContent = 'Answer';
+                    document.getElementById('resultsContent').innerHTML = `
+                        <div class="ask-answer-header">
+                            <strong>Q:</strong> ${escapeHtml(question)}
+                        </div>
+                        <div class="markdown-content">${renderMarkdown(data.answer)}</div>
+                    `;
+
+                    // ── Sources in left sidebar ───────────────────────────
+                    const sources = data.sources || [];
+                    if (sources.length > 0) {
+                        // Deduplicate by id
+                        const seen = new Set();
+                        const unique = sources.filter(s => {
+                            const id = s.id || s.fullname;
+                            if (!id || seen.has(id)) return false;
+                            seen.add(id); return true;
+                        });
+
+                        document.getElementById('sidebarTitle').textContent = `Sources (${unique.length})`;
+                        document.getElementById('facetsContent').innerHTML = unique.map((s, i) => {
+                            const name = escapeHtml(s.fullname || 'Unknown');
+                            const cat  = escapeHtml(s.category || '');
+                            const year = s.year || '';
+                            const mot  = s.motivation
+                                ? escapeHtml(s.motivation.substring(0, 90)) + '...'
+                                : '';
+                            return `<div class="source-card">
+                                <div class="source-card-name">${i + 1}. ${name}</div>
+                                <div class="source-card-meta">${cat} &middot; ${year}</div>
+                                ${mot ? `<div class="source-card-motivation">"${mot}"</div>` : ''}
+                            </div>`;
+                        }).join('');
+                    } else {
+                        document.getElementById('sidebarTitle').textContent = 'Sources';
+                        document.getElementById('facetsContent').innerHTML =
+                            '<p style="color:#999;font-size:13px">This query used aggregations — no individual documents were retrieved.</p>';
+                    }
+                } else {
+                    document.getElementById('resultsContent').innerHTML =
+                        `<div class="error">Error: ${escapeHtml(data.error || 'Unknown error')}</div>`;
+                    document.getElementById('facetsContent').innerHTML = '';
+                }
+            } catch (error) {
+                document.getElementById('resultsContent').innerHTML =
+                    `<div class="error">Error: ${escapeHtml(error.message)}</div>`;
+            } finally {
+                btn.disabled = false;
+                loading.style.display = 'none';
+            }
         }
 
         function displayFacets(facets) {
