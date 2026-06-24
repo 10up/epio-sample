@@ -1,5 +1,7 @@
 # ElasticPress.io Sample Project
 
+[![MIT License](https://img.shields.io/github/license/10up/epio-sample.svg)](https://github.com/10up/epio-sample/blob/trunk/LICENSE.md)
+
 A comprehensive example demonstrating how to use [ElasticPress.io](https://elasticpress.io) as a vector knowledge store for both traditional search and AI-powered applications, built with the Nobel Prize dataset.
 
 **Data Source:** [Nobel Prize API v2.1](https://www.nobelprize.org/about/developer-zone-2/) by Nobel Prize Outreach.
@@ -381,10 +383,6 @@ If you change `OPENAI_EMBEDDING_MODEL` or `OPENAI_EMBEDDING_DIMS`, you must recr
 - [Nobel Prize API v2.1](https://www.nobelprize.org/about/developer-zone-2/)
 
 ---
-
-## License
-
-MIT
 
 ## Support Level
 
