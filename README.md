@@ -1,6 +1,6 @@
 # ElasticPress.io Sample Project
 
-![Support Level](https://img.shields.io/badge/support-paid-red)(#support-level) [![MIT License](https://img.shields.io/github/license/10up/epio-sample.svg)](https://github.com/10up/epio-sample/blob/trunk/LICENSE.md)
+![Support Level](https://img.shields.io/badge/support-paid-red) [![MIT License](https://img.shields.io/github/license/10up/epio-sample.svg)](https://github.com/10up/epio-sample/blob/trunk/LICENSE.md)
 
 > A comprehensive example demonstrating how to use [ElasticPress.io](https://elasticpress.io) as a vector knowledge store for both traditional search and AI-powered applications, built with the Nobel Prize dataset.
 
