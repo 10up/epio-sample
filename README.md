@@ -1,6 +1,8 @@
 # ElasticPress.io Sample Project
 
-A comprehensive example demonstrating how to use [ElasticPress.io](https://elasticpress.io) as a vector knowledge store for both traditional search and AI-powered applications, built with the Nobel Prize dataset.
+![Support Level](https://img.shields.io/badge/support-paid-red)(#support-level) [![MIT License](https://img.shields.io/github/license/10up/epio-sample.svg)](https://github.com/10up/epio-sample/blob/trunk/LICENSE.md)
+
+> A comprehensive example demonstrating how to use [ElasticPress.io](https://elasticpress.io) as a vector knowledge store for both traditional search and AI-powered applications, built with the Nobel Prize dataset.
 
 **Data Source:** [Nobel Prize API v2.1](https://www.nobelprize.org/about/developer-zone-2/) by Nobel Prize Outreach.
 
@@ -27,16 +29,12 @@ A comprehensive example demonstrating how to use [ElasticPress.io](https://elast
 - Index naming conventions
 - Search template API for unauthenticated frontend access
 
----
-
 ## Prerequisites
 
 - PHP 8.1+
 - Composer
 - An [ElasticPress.io](https://www.elasticpress.io/) account
 - An OpenAI-compatible API key (for semantic search, Ask AI, and MCP tools)
-
----
 
 ## Quick Start
 
@@ -64,8 +62,6 @@ php -S localhost:8000 -t public
 
 Open http://localhost:8000 — use the **Search** tab for keyword/semantic/hybrid search, and the **Ask AI** tab for natural language questions.
 
----
-
 ## Configuration
 
 Copy `.env.example` to `.env` and fill in your credentials:
@@ -92,8 +88,6 @@ OPENAI_CHAT_MODEL=gpt-4o-mini
 | Ollama | `http://localhost:11434/v1` |
 | LM Studio | `http://localhost:1234/v1` |
 | Groq | `https://api.groq.com/openai/v1` |
-
----
 
 ## Setup Steps
 
@@ -144,8 +138,6 @@ php bin/setup-template.php
 
 Creates an ElasticPress.io search template enabling unauthenticated autosuggest directly from the browser.
 
----
-
 ## Using the Web Interface
 
 ```bash
@@ -176,8 +168,6 @@ Example questions:
 - *Which person won the most Nobel prizes?*
 - *Which country produced the most chemistry laureates?*
 
----
-
 ## CLI Scripts
 
 ```bash
@@ -198,8 +188,6 @@ php bin/ask.php "Which German physicists won prizes after 1950?" --verbose
 php bin/manage-templates.php list
 php bin/manage-templates.php view {index-name}
 ```
-
----
 
 ## MCP Server
 
@@ -268,8 +256,6 @@ Once connected, you can ask Claude to use the tools directly:
 
 > *Use the `hybrid_search` tool: breakthroughs in genetics*
 
----
-
 ## API Reference
 
 ### Search
@@ -295,8 +281,6 @@ Returns: `{ answer, sources[], question, mode: "rag" }`
 ```
 GET /api.php?id={document-id}
 ```
-
----
 
 ## Project Structure
 
@@ -346,8 +330,6 @@ GET /api.php?id={document-id}
         └── ServiceFactory.php             # Assembles AI services from config
 ```
 
----
-
 ## Troubleshooting
 
 **`explicit index in bulk is not allowed`**
@@ -370,8 +352,6 @@ Embeddings have not been generated yet. Run `php bin/generate-embeddings.php`.
 **Changing the embedding model**
 If you change `OPENAI_EMBEDDING_MODEL` or `OPENAI_EMBEDDING_DIMS`, you must recreate the index and regenerate all embeddings — the vector dimensions are fixed in the mapping and cannot be changed in place.
 
----
-
 ## Resources
 
 - [ElasticPress.io](https://www.elasticpress.io/) — Managed Elasticsearch service
@@ -380,16 +360,10 @@ If you change `OPENAI_EMBEDDING_MODEL` or `OPENAI_EMBEDDING_DIMS`, you must recr
 - [Model Context Protocol](https://modelcontextprotocol.io)
 - [Nobel Prize API v2.1](https://www.nobelprize.org/about/developer-zone-2/)
 
----
-
-## License
-
-MIT
-
 ## Support Level
 
 **Provided as-is.** This is a sample project with no support commitment. For engineering consulting enquiries visit [ElasticPress.io Consulting](https://www.elasticpress.io/elasticpress-consulting/).
 
-<p align="center">
-<a href="https://10up.com/contact/"><img src="https://10up.com/uploads/2016/10/10up-Github-Banner.png" width="850"></a>
-</p>
+## Like what you see?
+
+[![Work with the 10up WordPress Practice at Fueled](https://github.com/10up/.github/blob/trunk/profile/10up-github-banner.jpg)](http://10up.com/contact/)
